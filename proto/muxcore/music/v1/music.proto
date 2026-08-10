@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package muxcore.music.v1;
+
+option go_package = "github.com/Muxcore-Media/media-music/proto/gen/muxcore/music/v1;musicv1";
+
+// MusicManagementService is a Lidarr-class music library manager (scaffold).
+service MusicManagementService {
+  rpc AddArtist(AddArtistRequest) returns (AddArtistResponse);
+  rpc GetArtist(GetArtistRequest) returns (GetArtistResponse);
+  rpc ListArtists(ListArtistsRequest) returns (ListArtistsResponse);
+  rpc RemoveArtist(RemoveArtistRequest) returns (RemoveArtistResponse);
+  rpc AddAlbum(AddAlbumRequest) returns (AddAlbumResponse);
+  rpc ListAlbums(ListAlbumsRequest) returns (ListAlbumsResponse);
+}
+
+message Artist {
+  string id = 1;
+  string name = 2;
+  string musicbrainz_id = 3;
+  bool monitored = 4;
+  string path = 5;
+}
+
+message Album {
+  string id = 1;
+  string artist_id = 2;
+  string title = 3;
+  string musicbrainz_id = 4;
+  int32 year = 5;
+  bool monitored = 6;
+}
+
+message AddArtistRequest {
+  string name = 1;
+  string musicbrainz_id = 2;
+  bool monitored = 3;
+  string path = 4;
+}
+
+message AddArtistResponse {
+  Artist artist = 1;
+}
+
+message GetArtistRequest {
+  string id = 1;
+}
+
+message GetArtistResponse {
+  Artist artist = 1;
+}
+
+message ListArtistsRequest {
+  string query = 1;
+}
+
+message ListArtistsResponse {
+  repeated Artist artists = 1;
+}
+
+message RemoveArtistRequest {
+  string id = 1;
+  bool delete_files = 2;
+}
+
+message RemoveArtistResponse {
+  bool success = 1;
+}
+
+message AddAlbumRequest {
+  string artist_id = 1;
+  string title = 2;
+  string musicbrainz_id = 3;
+  int32 year = 4;
+  bool monitored = 5;
+}
+
+message AddAlbumResponse {
+  Album album = 1;
+}
+
+message ListAlbumsRequest {
+  string artist_id = 1;
+}
+
+message ListAlbumsResponse {
+  repeated Album albums = 1;
+}
