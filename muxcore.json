@@ -1,8 +1,8 @@
 {
   "id": "media-music",
   "name": "Music Manager",
-  "version": "0.1.0",
-  "description": "Lidarr-class music library manager scaffold",
+  "version": "0.2.1",
+  "description": "Lidarr-class music library manager with SQLite persistence",
   "roles": ["media", "music"],
   "capabilities": ["media.music", "music", "settings"]
 }
