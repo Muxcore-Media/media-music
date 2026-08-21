@@ -1,8 +1,23 @@
 {
   "id": "media-music",
   "name": "Music Manager",
-  "version": "0.2.1",
-  "description": "Lidarr-class music library manager with SQLite persistence",
-  "roles": ["media", "music"],
-  "capabilities": ["media.music", "music", "settings"]
+  "version": "0.3.0",
+  "description": "Lidarr-class music library manager with SQLite persistence and admin UI integration",
+  "roles": ["media_manager", "media", "music"],
+  "capabilities": [
+    "media.library",
+    "media.library.music",
+    "media.music",
+    "music",
+    "settings",
+    "backupable"
+  ],
+  "contracts": [
+    {
+      "repo": "github.com/Muxcore-Media/contracts-media-admin",
+      "interface": "MediaAdminService",
+      "version": "v0.1.0"
+    }
+  ],
+  "minCoreVersion": "0.4.0"
 }

@@ -4,14 +4,25 @@ package muxcore.music.v1;
 
 option go_package = "github.com/Muxcore-Media/media-music/proto/gen/muxcore/music/v1;musicv1";
 
-// MusicManagementService is a Lidarr-class music library manager (scaffold).
+// MusicManagementService is a Lidarr-class music library manager.
 service MusicManagementService {
   rpc AddArtist(AddArtistRequest) returns (AddArtistResponse);
-  rpc GetArtist(GetArtistRequest) returns (GetArtistResponse);
-  rpc ListArtists(ListArtistsRequest) returns (ListArtistsResponse);
   rpc RemoveArtist(RemoveArtistRequest) returns (RemoveArtistResponse);
+  rpc RefreshMetadata(RefreshMetadataRequest) returns (RefreshMetadataResponse);
+  rpc ListArtists(ListArtistsRequest) returns (ListArtistsResponse);
+  rpc ListMissing(ListMissingRequest) returns (ListMissingResponse);
+  rpc GetArtist(GetArtistRequest) returns (GetArtistResponse);
+  rpc UpdateArtist(UpdateArtistRequest) returns (UpdateArtistResponse);
   rpc AddAlbum(AddAlbumRequest) returns (AddAlbumResponse);
   rpc ListAlbums(ListAlbumsRequest) returns (ListAlbumsResponse);
+  rpc UpdateAlbumMonitored(UpdateAlbumMonitoredRequest) returns (UpdateAlbumMonitoredResponse);
+  rpc AddTrackFile(AddTrackFileRequest) returns (AddTrackFileResponse);
+  rpc RemoveTrackFile(RemoveTrackFileRequest) returns (RemoveTrackFileResponse);
+  rpc ListTrackFiles(ListTrackFilesRequest) returns (ListTrackFilesResponse);
+  rpc CreateTag(CreateTagRequest) returns (CreateTagResponse);
+  rpc DeleteTag(DeleteTagRequest) returns (DeleteTagResponse);
+  rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+  rpc SetItemTags(SetItemTagsRequest) returns (SetItemTagsResponse);
 }
 
 message Artist {
@@ -20,6 +31,13 @@ message Artist {
   string musicbrainz_id = 3;
   bool monitored = 4;
   string path = 5;
+  bool has_file = 6;
+  string quality_profile_id = 7;
+  string root_folder_path = 8;
+  string overview = 9;
+  string poster_url = 10;
+  string created_at = 11;
+  string updated_at = 12;
 }
 
 message Album {
@@ -29,6 +47,19 @@ message Album {
   string musicbrainz_id = 4;
   int32 year = 5;
   bool monitored = 6;
+  bool has_file = 7;
+}
+
+message TrackFile {
+  string id = 1;
+  string artist_id = 2;
+  string album_id = 3;
+  string title = 4;
+  string file_path = 5;
+  string quality = 6;
+  int64 size_bytes = 7;
+  string container = 8;
+  string created_at = 9;
 }
 
 message AddArtistRequest {
@@ -36,10 +67,65 @@ message AddArtistRequest {
   string musicbrainz_id = 2;
   bool monitored = 3;
   string path = 4;
+  string quality_profile_id = 5;
+  string root_folder_path = 6;
 }
 
 message AddArtistResponse {
   Artist artist = 1;
+}
+
+message RemoveArtistRequest {
+  string id = 1;
+  bool delete_files = 2;
+}
+
+message RemoveArtistResponse {}
+
+message RefreshMetadataRequest {
+  string artist_id = 1;
+}
+
+message RefreshMetadataResponse {}
+
+message ListArtistsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string query = 3;
+  string sort_by = 4;
+  string sort_order = 5;
+  string tag_id = 6;
+}
+
+message ListArtistsResponse {
+  repeated Artist artists = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message ListMissingRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string artist_id = 3;
+}
+
+message MissingAlbumItem {
+  string album_id = 1;
+  string artist_id = 2;
+  string artist_name = 3;
+  string title = 4;
+  int32 year = 5;
+  string musicbrainz_id = 6;
+  string quality_profile_id = 7;
+  string root_folder_path = 8;
+}
+
+message ListMissingResponse {
+  repeated MissingAlbumItem items = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
 }
 
 message GetArtistRequest {
@@ -50,21 +136,17 @@ message GetArtistResponse {
   Artist artist = 1;
 }
 
-message ListArtistsRequest {
-  string query = 1;
-}
-
-message ListArtistsResponse {
-  repeated Artist artists = 1;
-}
-
-message RemoveArtistRequest {
+message UpdateArtistRequest {
   string id = 1;
-  bool delete_files = 2;
+  optional string quality_profile_id = 2;
+  optional string root_folder_path = 3;
+  optional bool monitored = 4;
+  optional string name = 5;
+  optional string overview = 6;
 }
 
-message RemoveArtistResponse {
-  bool success = 1;
+message UpdateArtistResponse {
+  Artist artist = 1;
 }
 
 message AddAlbumRequest {
@@ -86,3 +168,72 @@ message ListAlbumsRequest {
 message ListAlbumsResponse {
   repeated Album albums = 1;
 }
+
+message UpdateAlbumMonitoredRequest {
+  string album_id = 1;
+  bool monitored = 2;
+}
+
+message UpdateAlbumMonitoredResponse {}
+
+message AddTrackFileRequest {
+  string album_id = 1;
+  string file_path = 2;
+  string title = 3;
+  string quality = 4;
+  int64 size_bytes = 5;
+  string container = 6;
+}
+
+message AddTrackFileResponse {
+  string file_id = 1;
+}
+
+message RemoveTrackFileRequest {
+  string file_id = 1;
+  bool delete_files = 2;
+}
+
+message RemoveTrackFileResponse {}
+
+message ListTrackFilesRequest {
+  string artist_id = 1;
+  string album_id = 2;
+}
+
+message ListTrackFilesResponse {
+  repeated TrackFile files = 1;
+}
+
+message CreateTagRequest {
+  string label = 1;
+}
+
+message CreateTagResponse {
+  string tag_id = 1;
+}
+
+message DeleteTagRequest {
+  string tag_id = 1;
+}
+
+message DeleteTagResponse {}
+
+message ListTagsRequest {}
+
+message ListTagsResponse {
+  repeated Tag tags = 1;
+}
+
+message Tag {
+  string id = 1;
+  string label = 2;
+  string created_at = 3;
+}
+
+message SetItemTagsRequest {
+  string item_id = 1;
+  repeated string tag_ids = 2;
+}
+
+message SetItemTagsResponse {}

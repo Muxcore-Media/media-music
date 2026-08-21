@@ -12,23 +12,31 @@ import (
 
 	"google.golang.org/grpc"
 
+	mediaadminv1 "github.com/Muxcore-Media/contracts-media-admin/gen/muxcore/media/admin/v1"
 	"github.com/Muxcore-Media/core/pkg/contracts"
+	"github.com/Muxcore-Media/core/sdk/go/client"
+	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
 	musicv1 "github.com/Muxcore-Media/media-music/proto/gen/muxcore/music/v1"
 )
 
 type Module struct {
-	id         string
-	grpcAddr   string
-	httpAddr   string
-	dataDir    string
-	libraryDir string
-
+	mu    sync.RWMutex
 	cfgMu sync.RWMutex
 	store *Store
+	mc    *client.Client
+
+	id         string
+	dataDir    string
+	libraryDir string
+	grpcAddr   string
+	httpAddr   string
 
 	grpcSrv *grpc.Server
-	lis     net.Listener
+	grpcLis net.Listener
 	httpSrv *http.Server
+	httpLis net.Listener
+
+	automationSearchFn func(ctx context.Context, req *automationv1.SearchItemRequest) (*automationv1.SearchItemResponse, error)
 }
 
 type Config struct {
@@ -55,6 +63,9 @@ func NewModule(cfg Config) *Module {
 	if v := os.Getenv("MUSIC_LIBRARY_DIR"); v != "" {
 		cfg.LibraryDir = v
 	}
+	if v := os.Getenv("MUSIC_GRPC_ADDR"); v != "" {
+		cfg.GRPCAddr = v
+	}
 	if v := os.Getenv("MUXCORE_HTTP_ADDR"); v != "" {
 		cfg.HTTPAddr = v
 	}
@@ -72,11 +83,16 @@ func NewModule(cfg Config) *Module {
 
 func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
-		ID: m.id, Name: "Music Manager", Version: "0.2.1",
-		Roles:        []string{"media", "music"},
-		Description:  "Lidarr-class music library manager with SQLite persistence",
-		Capabilities: []string{"media.music", "music", "settings"},
-		HTTPAddr:     m.grpcAddr,
+		ID: m.id, Name: "Music Manager", Version: "0.3.0",
+		Roles:        []string{"media_manager", "media", "music"},
+		Description:  "Lidarr-class music library manager with SQLite persistence and admin UI integration",
+		Author:       "MuxCore",
+		Capabilities: []string{"media.library", "media.library.music", "media.music", "music", "settings", "backupable"},
+		Contracts: []contracts.ContractDeclaration{
+			{Repo: "github.com/Muxcore-Media/contracts-media-admin", Interface: "MediaAdminService", Version: "v0.1.0"},
+		},
+		MinCoreVersion: "0.4.0",
+		HTTPAddr:       m.grpcAddr,
 	}
 }
 
@@ -93,7 +109,22 @@ func (m *Module) Init(ctx context.Context) error {
 		return err
 	}
 	m.store = store
-	slog.Info("music library store open", "db", dbPath, "library", m.libraryDir)
+
+	lis, err := net.Listen("tcp", m.grpcAddr)
+	if err != nil {
+		return fmt.Errorf("listen gRPC %s: %w", m.grpcAddr, err)
+	}
+	m.grpcLis = lis
+	m.grpcAddr = lis.Addr().String()
+
+	httpLis, err := net.Listen("tcp", m.httpAddr)
+	if err != nil {
+		return fmt.Errorf("listen HTTP %s: %w", m.httpAddr, err)
+	}
+	m.httpLis = httpLis
+	m.httpAddr = httpLis.Addr().String()
+
+	slog.Info("music library store open", "db", dbPath, "library", m.libraryDir, "grpc", m.grpcAddr, "http", m.httpAddr)
 	return nil
 }
 
@@ -101,47 +132,56 @@ func (m *Module) Start(ctx context.Context) error {
 	if m.store == nil {
 		return fmt.Errorf("store not initialized")
 	}
-	lis, err := net.Listen("tcp", m.grpcAddr)
-	if err != nil {
-		return fmt.Errorf("listen gRPC %s: %w", m.grpcAddr, err)
-	}
-	m.lis = lis
-	m.grpcAddr = lis.Addr().String()
 	m.grpcSrv = grpc.NewServer()
+	mediaadminv1.RegisterMediaAdminServiceServer(m.grpcSrv, mediaAdminServer{m: m})
 	musicv1.RegisterMusicManagementServiceServer(m.grpcSrv, &musicServer{m: m})
 	registerMusicMesh(m.grpcSrv, m.id, m)
+
 	go func() {
 		slog.Info("music gRPC listening", "addr", m.grpcAddr)
-		if err := m.grpcSrv.Serve(lis); err != nil {
+		if err := m.grpcSrv.Serve(m.grpcLis); err != nil {
 			slog.Error("gRPC serve", "error", err)
 		}
 	}()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
 	m.registerMusicHTTPAPI(mux)
-	httpLis, err := net.Listen("tcp", m.httpAddr)
-	if err != nil {
-		return fmt.Errorf("listen HTTP %s: %w", m.httpAddr, err)
-	}
-	m.httpAddr = httpLis.Addr().String()
 	m.httpSrv = &http.Server{Handler: mux}
 	go func() {
 		slog.Info("health listening", "addr", m.httpAddr)
-		if err := m.httpSrv.Serve(httpLis); err != nil && err != http.ErrServerClosed {
+		if err := m.httpSrv.Serve(m.httpLis); err != nil && err != http.ErrServerClosed {
 			slog.Error("health serve", "error", err)
 		}
 	}()
+
+	go m.dialCore(context.Background())
 	return nil
 }
 
-// GRPCListenAddr returns the bound gRPC address after Start (useful in tests).
-func (m *Module) GRPCListenAddr() string { return m.grpcAddr }
-
-// HTTPListenAddr returns the bound health/HTTP API address after Start.
-func (m *Module) HTTPListenAddr() string { return m.httpAddr }
+func (m *Module) dialCore(ctx context.Context) {
+	meshAddr := os.Getenv("MUXCORE_GRPC_ADDR")
+	if meshAddr == "" {
+		meshAddr = "localhost:9090"
+	}
+	insecureMode := os.Getenv("MUXCORE_INSECURE_DISABLE_TLS") == "true" || os.Getenv("MUXCORE_GRPC_INSECURE") == "true"
+	var opts []client.Option
+	if insecureMode {
+		opts = append(opts, client.WithInsecure())
+	}
+	c, err := client.Dial(meshAddr, opts...)
+	if err != nil {
+		slog.Error("media-music: dial core", "error", err)
+		return
+	}
+	m.mu.Lock()
+	m.mc = c
+	m.mu.Unlock()
+	slog.Info("media-music: connected to core mesh", "addr", meshAddr)
+}
 
 func (m *Module) Stop(ctx context.Context) error {
 	if m.grpcSrv != nil {
@@ -164,6 +204,12 @@ func (m *Module) Health(ctx context.Context) error {
 	return nil
 }
 
+func (m *Module) getLibraryDir() string {
+	m.cfgMu.RLock()
+	defer m.cfgMu.RUnlock()
+	return m.libraryDir
+}
+
 // ScanLibrary scans the configured library root into SQLite.
 func (m *Module) ScanLibrary() (*ScanResult, error) {
 	m.cfgMu.RLock()
@@ -176,82 +222,5 @@ func (m *Module) ScanLibrary() (*ScanResult, error) {
 	return store.ScanLibraryRoot(root)
 }
 
-type musicServer struct {
-	musicv1.UnimplementedMusicManagementServiceServer
-	m *Module
-}
-
-func (s *musicServer) AddArtist(_ context.Context, req *musicv1.AddArtistRequest) (*musicv1.AddArtistResponse, error) {
-	a, err := s.m.store.AddArtist(Artist{
-		Name: req.GetName(), MusicBrainzID: req.GetMusicbrainzId(),
-		Monitored: req.GetMonitored(), Path: req.GetPath(),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &musicv1.AddArtistResponse{Artist: toPBArtist(a)}, nil
-}
-
-func (s *musicServer) GetArtist(_ context.Context, req *musicv1.GetArtistRequest) (*musicv1.GetArtistResponse, error) {
-	a, err := s.m.store.GetArtist(req.GetId())
-	if err != nil {
-		return nil, err
-	}
-	return &musicv1.GetArtistResponse{Artist: toPBArtist(a)}, nil
-}
-
-func (s *musicServer) ListArtists(_ context.Context, req *musicv1.ListArtistsRequest) (*musicv1.ListArtistsResponse, error) {
-	items, err := s.m.store.ListArtists(req.GetQuery())
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*musicv1.Artist, 0, len(items))
-	for _, a := range items {
-		out = append(out, toPBArtist(a))
-	}
-	return &musicv1.ListArtistsResponse{Artists: out}, nil
-}
-
-func (s *musicServer) RemoveArtist(_ context.Context, req *musicv1.RemoveArtistRequest) (*musicv1.RemoveArtistResponse, error) {
-	if err := s.m.store.RemoveArtist(req.GetId()); err != nil {
-		return nil, err
-	}
-	return &musicv1.RemoveArtistResponse{Success: true}, nil
-}
-
-func (s *musicServer) AddAlbum(_ context.Context, req *musicv1.AddAlbumRequest) (*musicv1.AddAlbumResponse, error) {
-	al, err := s.m.store.AddAlbum(Album{
-		ArtistID: req.GetArtistId(), Title: req.GetTitle(),
-		MusicBrainzID: req.GetMusicbrainzId(), Year: req.GetYear(), Monitored: req.GetMonitored(),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &musicv1.AddAlbumResponse{Album: toPBAlbum(al)}, nil
-}
-
-func (s *musicServer) ListAlbums(_ context.Context, req *musicv1.ListAlbumsRequest) (*musicv1.ListAlbumsResponse, error) {
-	items, err := s.m.store.ListAlbums(req.GetArtistId())
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*musicv1.Album, 0, len(items))
-	for _, a := range items {
-		out = append(out, toPBAlbum(a))
-	}
-	return &musicv1.ListAlbumsResponse{Albums: out}, nil
-}
-
-func toPBArtist(a *Artist) *musicv1.Artist {
-	return &musicv1.Artist{
-		Id: a.ID, Name: a.Name, MusicbrainzId: a.MusicBrainzID,
-		Monitored: a.Monitored, Path: a.Path,
-	}
-}
-
-func toPBAlbum(a *Album) *musicv1.Album {
-	return &musicv1.Album{
-		Id: a.ID, ArtistId: a.ArtistID, Title: a.Title,
-		MusicbrainzId: a.MusicBrainzID, Year: a.Year, Monitored: a.Monitored,
-	}
-}
+func (m *Module) GRPCListenAddr() string { return m.grpcAddr }
+func (m *Module) HTTPListenAddr() string { return m.httpAddr }
