@@ -6,17 +6,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
 type Artist struct {
-	ID            string
-	Name          string
-	MusicBrainzID string
-	Monitored     bool
-	Path          string
+	ID               string
+	Name             string
+	MusicBrainzID    string
+	Monitored        bool
+	Path             string
+	HasFile          bool
+	QualityProfileID string
+	RootFolderPath   string
+	Overview         string
+	PosterURL        string
+	CreatedAt        string
+	UpdatedAt        string
 }
 
 type Album struct {
@@ -26,15 +34,37 @@ type Album struct {
 	MusicBrainzID string
 	Year          int32
 	Monitored     bool
+	HasFile       bool
 }
 
 // Track is a single audio file in the library.
 type Track struct {
-	ID       string
-	AlbumID  string
-	ArtistID string
-	Title    string
-	Path     string
+	ID        string
+	AlbumID   string
+	ArtistID  string
+	Title     string
+	Path      string
+	Quality   string
+	SizeBytes int64
+	Container string
+	CreatedAt string
+}
+
+type Tag struct {
+	ID        string
+	Label     string
+	CreatedAt string
+}
+
+type MissingAlbum struct {
+	AlbumID          string
+	ArtistID         string
+	ArtistName       string
+	Title            string
+	Year             int32
+	MusicBrainzID    string
+	QualityProfileID string
+	RootFolderPath   string
 }
 
 // Store persists the music library in SQLite.
@@ -95,11 +125,53 @@ func (s *Store) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(artist_id);
 		CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_id);
 		CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(path);
+		CREATE TABLE IF NOT EXISTS tags (
+			id TEXT PRIMARY KEY,
+			label TEXT UNIQUE NOT NULL,
+			created_at TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS item_tags (
+			item_id TEXT NOT NULL,
+			tag_id TEXT NOT NULL,
+			PRIMARY KEY (item_id, tag_id)
+		);
+		CREATE TABLE IF NOT EXISTS history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			item_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			source_title TEXT DEFAULT '',
+			quality TEXT DEFAULT '',
+			data TEXT DEFAULT '{}',
+			date TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_history_item ON history(item_id);
 	`)
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	for _, col := range []string{
+		`ALTER TABLE artists ADD COLUMN has_file INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE artists ADD COLUMN quality_profile_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE artists ADD COLUMN root_folder_path TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE artists ADD COLUMN overview TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE artists ADD COLUMN poster_url TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE artists ADD COLUMN created_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE artists ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE albums ADD COLUMN has_file INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE tracks ADD COLUMN quality TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tracks ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE tracks ADD COLUMN container TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tracks ADD COLUMN created_at TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := s.db.Exec(col); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("migrate column: %w", err)
+		}
+	}
 	return nil
+}
+
+func nowRFC3339() string {
+	return time.Now().UTC().Format(time.RFC3339)
 }
 
 // Close closes the database.
@@ -117,14 +189,24 @@ func (s *Store) AddArtist(a Artist) (*Artist, error) {
 	if a.ID == "" {
 		a.ID = "ar_" + uuid.NewString()[:8]
 	}
+	now := nowRFC3339()
+	if a.CreatedAt == "" {
+		a.CreatedAt = now
+	}
+	if a.UpdatedAt == "" {
+		a.UpdatedAt = now
+	}
 	monitored := 0
 	if a.Monitored {
 		monitored = 1
 	}
 	_, err := s.db.Exec(`
-		INSERT INTO artists (id, name, musicbrainz_id, monitored, path)
-		VALUES (?, ?, ?, ?, ?)
-	`, a.ID, a.Name, a.MusicBrainzID, monitored, a.Path)
+		INSERT INTO artists (
+			id, name, musicbrainz_id, monitored, path, has_file,
+			quality_profile_id, root_folder_path, overview, poster_url, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+	`, a.ID, a.Name, a.MusicBrainzID, monitored, a.Path,
+		a.QualityProfileID, a.RootFolderPath, a.Overview, a.PosterURL, a.CreatedAt, a.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert artist: %w", err)
 	}
@@ -134,32 +216,69 @@ func (s *Store) AddArtist(a Artist) (*Artist, error) {
 
 func (s *Store) GetArtist(id string) (*Artist, error) {
 	row := s.db.QueryRow(`
-		SELECT id, name, musicbrainz_id, monitored, path FROM artists WHERE id = ?
+		SELECT id, name, musicbrainz_id, monitored, path, has_file,
+			quality_profile_id, root_folder_path, overview, poster_url, created_at, updated_at
+		FROM artists WHERE id = ?
 	`, id)
 	return scanArtist(row)
 }
 
 func (s *Store) ListArtists(query string) ([]*Artist, error) {
-	rows, err := s.db.Query(`
-		SELECT id, name, musicbrainz_id, monitored, path FROM artists ORDER BY name
-	`)
+	items, _, err := s.ListArtistsPage(query, "", 1, 0, "", "")
+	return items, err
+}
+
+func (s *Store) ListArtistsPage(query, tagID string, page, pageSize int, sortBy, sortOrder string) ([]*Artist, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 50
+	}
+	if sortBy == "" {
+		sortBy = "name"
+	}
+	if sortOrder != "desc" {
+		sortOrder = "asc"
+	}
+	base := `FROM artists`
+	var where []string
+	var args []any
+	if q := strings.TrimSpace(query); q != "" {
+		where = append(where, `name LIKE ?`)
+		args = append(args, "%"+q+"%")
+	}
+	if tagID != "" {
+		where = append(where, `id IN (SELECT item_id FROM item_tags WHERE tag_id = ?)`)
+		args = append(args, tagID)
+	}
+	clause := ""
+	if len(where) > 0 {
+		clause = " WHERE " + strings.Join(where, " AND ")
+	}
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(*) `+base+clause, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count artists: %w", err)
+	}
+	offset := (page - 1) * pageSize
+	q := `SELECT id, name, musicbrainz_id, monitored, path, has_file,
+		quality_profile_id, root_folder_path, overview, poster_url, created_at, updated_at ` +
+		base + clause + fmt.Sprintf(` ORDER BY %s %s LIMIT ? OFFSET ?`, sortBy, sortOrder)
+	qargs := append(append([]any{}, args...), pageSize, offset)
+	rows, err := s.db.Query(q, qargs...)
 	if err != nil {
-		return nil, fmt.Errorf("list artists: %w", err)
+		return nil, 0, fmt.Errorf("list artists: %w", err)
 	}
 	defer rows.Close()
-	q := strings.ToLower(strings.TrimSpace(query))
 	out := make([]*Artist, 0)
 	for rows.Next() {
 		a, err := scanArtist(rows)
 		if err != nil {
-			return nil, err
-		}
-		if q != "" && !strings.Contains(strings.ToLower(a.Name), q) {
-			continue
+			return nil, 0, err
 		}
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 func (s *Store) RemoveArtist(id string) error {
@@ -217,12 +336,12 @@ func (s *Store) ListAlbums(artistID string) ([]*Album, error) {
 	)
 	if artistID != "" {
 		rows, err = s.db.Query(`
-			SELECT id, artist_id, title, musicbrainz_id, year, monitored
+			SELECT id, artist_id, title, musicbrainz_id, year, monitored, has_file
 			FROM albums WHERE artist_id = ? ORDER BY year, title
 		`, artistID)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, artist_id, title, musicbrainz_id, year, monitored
+			SELECT id, artist_id, title, musicbrainz_id, year, monitored, has_file
 			FROM albums ORDER BY title
 		`)
 	}
@@ -241,20 +360,26 @@ func (s *Store) ListAlbums(artistID string) ([]*Album, error) {
 	return out, rows.Err()
 }
 
-// ListTracks returns tracks, optionally filtered by album ID.
-func (s *Store) ListTracks(albumID string) ([]*Track, error) {
+// ListTracks returns tracks, optionally filtered by album or artist ID.
+func (s *Store) ListTracks(albumID, artistID string) ([]*Track, error) {
 	var (
 		rows *sql.Rows
 		err  error
 	)
 	if albumID != "" {
 		rows, err = s.db.Query(`
-			SELECT id, album_id, artist_id, title, path FROM tracks
-			WHERE album_id = ? ORDER BY title
+			SELECT id, album_id, artist_id, title, path, quality, size_bytes, container, created_at
+			FROM tracks WHERE album_id = ? ORDER BY title
 		`, albumID)
+	} else if artistID != "" {
+		rows, err = s.db.Query(`
+			SELECT id, album_id, artist_id, title, path, quality, size_bytes, container, created_at
+			FROM tracks WHERE artist_id = ? ORDER BY title
+		`, artistID)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, album_id, artist_id, title, path FROM tracks ORDER BY title
+			SELECT id, album_id, artist_id, title, path, quality, size_bytes, container, created_at
+			FROM tracks ORDER BY title
 		`)
 	}
 	if err != nil {
@@ -272,24 +397,9 @@ func (s *Store) ListTracks(albumID string) ([]*Track, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) findArtistByName(name string) (*Artist, error) {
-	row := s.db.QueryRow(`
-		SELECT id, name, musicbrainz_id, monitored, path FROM artists
-		WHERE lower(name) = lower(?) LIMIT 1
-	`, name)
-	a, err := scanArtist(row)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return a, nil
-}
-
 func (s *Store) findAlbum(artistID, title string) (*Album, error) {
 	row := s.db.QueryRow(`
-		SELECT id, artist_id, title, musicbrainz_id, year, monitored FROM albums
+		SELECT id, artist_id, title, musicbrainz_id, year, monitored, has_file FROM albums
 		WHERE artist_id = ? AND lower(title) = lower(?) LIMIT 1
 	`, artistID, title)
 	al, err := scanAlbum(row)
@@ -304,7 +414,7 @@ func (s *Store) findAlbum(artistID, title string) (*Album, error) {
 
 func (s *Store) findTrackByPath(path string) (*Track, error) {
 	row := s.db.QueryRow(`
-		SELECT id, album_id, artist_id, title, path FROM tracks WHERE path = ?
+		SELECT id, album_id, artist_id, title, path, quality, size_bytes, container, created_at FROM tracks WHERE path = ?
 	`, path)
 	t, err := scanTrack(row)
 	if err != nil {
@@ -323,26 +433,36 @@ func (s *Store) upsertTrack(t Track) (*Track, error) {
 	}
 	if existing != nil {
 		_, err := s.db.Exec(`
-			UPDATE tracks SET album_id = ?, artist_id = ?, title = ? WHERE id = ?
-		`, t.AlbumID, t.ArtistID, t.Title, existing.ID)
+			UPDATE tracks SET album_id = ?, artist_id = ?, title = ?, quality = ?, size_bytes = ?, container = ? WHERE id = ?
+		`, t.AlbumID, t.ArtistID, t.Title, t.Quality, t.SizeBytes, t.Container, existing.ID)
 		if err != nil {
 			return nil, fmt.Errorf("update track: %w", err)
 		}
 		existing.AlbumID = t.AlbumID
 		existing.ArtistID = t.ArtistID
 		existing.Title = t.Title
+		existing.Quality = t.Quality
+		existing.SizeBytes = t.SizeBytes
+		existing.Container = t.Container
+		_ = s.refreshAlbumHasFile(t.AlbumID)
+		_ = s.refreshArtistHasFile(t.ArtistID)
 		return existing, nil
 	}
 	if t.ID == "" {
 		t.ID = "tr_" + uuid.NewString()[:8]
 	}
+	if t.CreatedAt == "" {
+		t.CreatedAt = nowRFC3339()
+	}
 	_, err = s.db.Exec(`
-		INSERT INTO tracks (id, album_id, artist_id, title, path)
-		VALUES (?, ?, ?, ?, ?)
-	`, t.ID, t.AlbumID, t.ArtistID, t.Title, t.Path)
+		INSERT INTO tracks (id, album_id, artist_id, title, path, quality, size_bytes, container, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, t.ID, t.AlbumID, t.ArtistID, t.Title, t.Path, t.Quality, t.SizeBytes, t.Container, t.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert track: %w", err)
 	}
+	_ = s.refreshAlbumHasFile(t.AlbumID)
+	_ = s.refreshArtistHasFile(t.ArtistID)
 	out := t
 	return &out, nil
 }
@@ -353,33 +473,41 @@ type rowScanner interface {
 
 func scanArtist(row rowScanner) (*Artist, error) {
 	var a Artist
-	var monitored int
-	if err := row.Scan(&a.ID, &a.Name, &a.MusicBrainzID, &monitored, &a.Path); err != nil {
+	var monitored, hasFile int
+	if err := row.Scan(
+		&a.ID, &a.Name, &a.MusicBrainzID, &monitored, &a.Path, &hasFile,
+		&a.QualityProfileID, &a.RootFolderPath, &a.Overview, &a.PosterURL, &a.CreatedAt, &a.UpdatedAt,
+	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("artist not found")
 		}
 		return nil, err
 	}
 	a.Monitored = monitored != 0
+	a.HasFile = hasFile != 0
 	return &a, nil
 }
 
 func scanAlbum(row rowScanner) (*Album, error) {
 	var al Album
-	var monitored int
-	if err := row.Scan(&al.ID, &al.ArtistID, &al.Title, &al.MusicBrainzID, &al.Year, &monitored); err != nil {
+	var monitored, hasFile int
+	if err := row.Scan(&al.ID, &al.ArtistID, &al.Title, &al.MusicBrainzID, &al.Year, &monitored, &hasFile); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("album not found")
 		}
 		return nil, err
 	}
 	al.Monitored = monitored != 0
+	al.HasFile = hasFile != 0
 	return &al, nil
 }
 
 func scanTrack(row rowScanner) (*Track, error) {
 	var t Track
-	if err := row.Scan(&t.ID, &t.AlbumID, &t.ArtistID, &t.Title, &t.Path); err != nil {
+	if err := row.Scan(
+		&t.ID, &t.AlbumID, &t.ArtistID, &t.Title, &t.Path,
+		&t.Quality, &t.SizeBytes, &t.Container, &t.CreatedAt,
+	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("track not found")
 		}

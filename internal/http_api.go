@@ -3,6 +3,8 @@ package internal
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -11,6 +13,72 @@ import (
 func (m *Module) registerMusicHTTPAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/artists", m.handleListArtistsHTTP)
 	mux.HandleFunc("GET /api/artists/{id}", m.handleGetArtistHTTP)
+	mux.HandleFunc("GET /api/tracks/{id}/stream", m.handleStreamTrackHTTP)
+	mux.HandleFunc("GET /api/tracks/{id}/lyrics", m.handleTrackLyricsHTTP)
+}
+
+func (m *Module) handleStreamTrackHTTP(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" || m.store == nil {
+		http.NotFound(w, r)
+		return
+	}
+	t, err := m.store.GetTrack(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, t.Path)
+}
+
+func (m *Module) handleTrackLyricsHTTP(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" || m.store == nil {
+		http.NotFound(w, r)
+		return
+	}
+	t, err := m.store.GetTrack(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	trackPath := t.Path
+	title := t.Title
+	lrc := findLyricsBeside(trackPath)
+	if lrc == "" {
+		writeJSON(w, map[string]any{
+			"track_id": id,
+			"title":    title,
+			"found":    false,
+			"format":   "",
+			"text":     "",
+		})
+		return
+	}
+	raw, err := os.ReadFile(lrc)
+	if err != nil {
+		http.Error(w, fmtJSONError(err), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"track_id": id,
+		"title":    title,
+		"found":    true,
+		"format":   "lrc",
+		"path":     lrc,
+		"text":     string(raw),
+	})
+}
+
+func findLyricsBeside(trackPath string) string {
+	base := strings.TrimSuffix(trackPath, filepath.Ext(trackPath))
+	for _, ext := range []string{".lrc", ".txt"} {
+		p := base + ext
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 func (m *Module) handleListArtistsHTTP(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +124,7 @@ func (m *Module) handleGetArtistHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	detail := artistDetailJSON{Artist: toArtistJSON(a), Albums: make([]albumJSON, 0, len(albums))}
 	for _, al := range albums {
-		detail.Albums = append(detail.Albums, toAlbumJSON(al))
+		detail.Albums = append(detail.Albums, m.albumJSONWithTracks(al))
 	}
 	writeJSON(w, detail)
 }

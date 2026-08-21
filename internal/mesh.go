@@ -33,12 +33,22 @@ type artistJSON struct {
 }
 
 type albumJSON struct {
-	ID            string `json:"id"`
-	ArtistID      string `json:"artist_id"`
-	Title         string `json:"title"`
-	MusicBrainzID string `json:"musicbrainz_id"`
-	Year          int32  `json:"year"`
-	Monitored     bool   `json:"monitored"`
+	ID            string      `json:"id"`
+	ArtistID      string      `json:"artist_id"`
+	Title         string      `json:"title"`
+	MusicBrainzID string      `json:"musicbrainz_id"`
+	Year          int32       `json:"year"`
+	Monitored     bool        `json:"monitored"`
+	Tracks        []trackJSON `json:"tracks,omitempty"`
+}
+
+type trackJSON struct {
+	ID        string `json:"id"`
+	AlbumID   string `json:"album_id"`
+	ArtistID  string `json:"artist_id"`
+	Title     string `json:"title"`
+	Path      string `json:"path"`
+	StreamURL string `json:"stream_url,omitempty"`
 }
 
 type artistDetailJSON struct {
@@ -159,7 +169,7 @@ func (s *musicMeshServer) getArtist(payload []byte) (*meshv1.CallResponse, error
 	}
 	detail := artistDetailJSON{Artist: toArtistJSON(a), Albums: make([]albumJSON, 0, len(albums))}
 	for _, al := range albums {
-		detail.Albums = append(detail.Albums, toAlbumJSON(al))
+		detail.Albums = append(detail.Albums, s.m.albumJSONWithTracks(al))
 	}
 	raw, err := json.Marshal(detail)
 	if err != nil {
@@ -180,4 +190,27 @@ func toAlbumJSON(a *Album) albumJSON {
 		ID: a.ID, ArtistID: a.ArtistID, Title: a.Title,
 		MusicBrainzID: a.MusicBrainzID, Year: a.Year, Monitored: a.Monitored,
 	}
+}
+
+func toTrackJSON(t *Track) trackJSON {
+	return trackJSON{
+		ID: t.ID, AlbumID: t.AlbumID, ArtistID: t.ArtistID, Title: t.Title, Path: t.Path,
+		StreamURL: "/stream/music/" + t.ID,
+	}
+}
+
+func (m *Module) albumJSONWithTracks(al *Album) albumJSON {
+	out := toAlbumJSON(al)
+	if m.store == nil {
+		return out
+	}
+	tracks, err := m.store.ListTracks(al.ID, "")
+	if err != nil {
+		return out
+	}
+	out.Tracks = make([]trackJSON, 0, len(tracks))
+	for _, t := range tracks {
+		out.Tracks = append(out.Tracks, toTrackJSON(t))
+	}
+	return out
 }

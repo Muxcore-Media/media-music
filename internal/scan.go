@@ -120,6 +120,9 @@ func (s *Store) importAudioFile(artistName, albumTitle, trackTitle, absPath stri
 		ArtistID: ar.ID,
 		Title:    trackTitle,
 		Path:     absPath,
+		Quality:  "unknown",
+		Container: trackContainer(absPath),
+		SizeBytes: fileSize(absPath),
 	})
 	if err != nil {
 		return false, err

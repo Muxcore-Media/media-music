@@ -53,7 +53,7 @@ func TestScanLibraryRootFixtures(t *testing.T) {
 	if len(albums) < 1 {
 		t.Fatal("expected album from fixtures")
 	}
-	tracks, err := s.ListTracks(albums[0].ID)
+	tracks, err := s.ListTracks(albums[0].ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
