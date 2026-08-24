@@ -1,28 +1,29 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 )
 
-func (s *Store) CreateTag(label string) (string, error) {
+func (s *Store) CreateTag(ctx context.Context, label string) (string, error) {
 	label = strings.TrimSpace(label)
 	if label == "" {
 		return "", fmt.Errorf("label required")
 	}
 	id := "tag_" + uuid.NewString()[:8]
-	_, err := s.db.Exec(`INSERT INTO tags (id, label, created_at) VALUES (?, ?, ?)`, id, label, nowRFC3339())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO tags (id, label, created_at) VALUES (?, ?, ?)`, id, label, nowRFC3339())
 	if err != nil {
 		return "", fmt.Errorf("create tag: %w", err)
 	}
 	return id, nil
 }
 
-func (s *Store) DeleteTag(id string) error {
-	_, _ = s.db.Exec(`DELETE FROM item_tags WHERE tag_id = ?`, id)
-	res, err := s.db.Exec(`DELETE FROM tags WHERE id = ?`, id)
+func (s *Store) DeleteTag(ctx context.Context, id string) error {
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM item_tags WHERE tag_id = ?`, id)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM tags WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
@@ -33,12 +34,12 @@ func (s *Store) DeleteTag(id string) error {
 	return nil
 }
 
-func (s *Store) ListTags() ([]*Tag, error) {
-	rows, err := s.db.Query(`SELECT id, label, created_at FROM tags ORDER BY label`)
+func (s *Store) ListTags(ctx context.Context) ([]*Tag, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, label, created_at FROM tags ORDER BY label`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]*Tag, 0)
 	for rows.Next() {
 		var t Tag
@@ -50,15 +51,15 @@ func (s *Store) ListTags() ([]*Tag, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) SetItemTags(itemID string, tagIDs []string) error {
-	if _, err := s.db.Exec(`DELETE FROM item_tags WHERE item_id = ?`, itemID); err != nil {
+func (s *Store) SetItemTags(ctx context.Context, itemID string, tagIDs []string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM item_tags WHERE item_id = ?`, itemID); err != nil {
 		return err
 	}
 	for _, tid := range tagIDs {
 		if tid == "" {
 			continue
 		}
-		if _, err := s.db.Exec(`INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)`, itemID, tid); err != nil {
+		if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)`, itemID, tid); err != nil {
 			return err
 		}
 	}

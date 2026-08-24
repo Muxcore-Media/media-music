@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -30,7 +31,7 @@ type ScanResult struct {
 // ScanLibraryRoot walks root for audio files and upserts artists/albums/tracks.
 // Layout expected: Artist/Album/track.ext (Artist/track.ext → "Unknown Album").
 // Metadata is derived only from path/filename — no network lookups.
-func (s *Store) ScanLibraryRoot(root string) (*ScanResult, error) {
+func (s *Store) ScanLibraryRoot(ctx context.Context, root string) (*ScanResult, error) {
 	root, err := filepath.Abs(filepath.Clean(root))
 	if err != nil {
 		return nil, fmt.Errorf("library root: %w", err)
@@ -56,15 +57,15 @@ func (s *Store) ScanLibraryRoot(root string) (*ScanResult, error) {
 			return nil
 		}
 		res.FilesFound++
-		abs, err := filepath.Abs(path)
-		if err != nil {
+		abs, absErr := filepath.Abs(path)
+		if absErr != nil {
 			res.FilesSkipped++
-			return nil
+			return nil //nolint:nilerr // skip unreadable paths during library scan
 		}
 		artistName, albumTitle, trackTitle := inferFromPath(root, abs)
-		imported, err := s.importAudioFile(artistName, albumTitle, trackTitle, abs)
-		if err != nil {
-			return err
+		imported, importErr := s.importAudioFile(ctx, artistName, albumTitle, trackTitle, abs)
+		if importErr != nil {
+			return importErr
 		}
 		if imported {
 			res.FilesImported++
@@ -79,18 +80,18 @@ func (s *Store) ScanLibraryRoot(root string) (*ScanResult, error) {
 	return res, nil
 }
 
-func (s *Store) importAudioFile(artistName, albumTitle, trackTitle, absPath string) (imported bool, err error) {
-	existing, err := s.findTrackByPath(absPath)
+func (s *Store) importAudioFile(ctx context.Context, artistName, albumTitle, trackTitle, absPath string) (imported bool, err error) {
+	existing, err := s.findTrackByPath(ctx, absPath)
 	if err != nil {
 		return false, err
 	}
 
-	ar, err := s.findArtistByName(artistName)
+	ar, err := s.findArtistByName(ctx, artistName)
 	if err != nil {
 		return false, err
 	}
 	if ar == nil {
-		ar, err = s.AddArtist(Artist{
+		ar, err = s.AddArtist(ctx, Artist{
 			Name:      artistName,
 			Monitored: true,
 			Path:      filepath.Dir(filepath.Dir(absPath)),
@@ -100,12 +101,12 @@ func (s *Store) importAudioFile(artistName, albumTitle, trackTitle, absPath stri
 		}
 	}
 
-	al, err := s.findAlbum(ar.ID, albumTitle)
+	al, err := s.findAlbum(ctx, ar.ID, albumTitle)
 	if err != nil {
 		return false, err
 	}
 	if al == nil {
-		al, err = s.AddAlbum(Album{
+		al, err = s.AddAlbum(ctx, Album{
 			ArtistID:  ar.ID,
 			Title:     albumTitle,
 			Monitored: true,
@@ -115,12 +116,12 @@ func (s *Store) importAudioFile(artistName, albumTitle, trackTitle, absPath stri
 		}
 	}
 
-	_, err = s.upsertTrack(Track{
-		AlbumID:  al.ID,
-		ArtistID: ar.ID,
-		Title:    trackTitle,
-		Path:     absPath,
-		Quality:  "unknown",
+	_, err = s.upsertTrack(ctx, Track{
+		AlbumID:   al.ID,
+		ArtistID:  ar.ID,
+		Title:     trackTitle,
+		Path:      absPath,
+		Quality:   "unknown",
 		Container: trackContainer(absPath),
 		SizeBytes: fileSize(absPath),
 	})

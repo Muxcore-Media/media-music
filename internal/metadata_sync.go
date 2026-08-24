@@ -28,7 +28,7 @@ func (m *Module) syncArtistMetadataFromMusicBrainz(ctx context.Context, a *Artis
 	}
 	overview := strings.TrimSpace(resp.GetDisambiguation())
 	if overview != "" && overview != a.Overview {
-		_, _ = m.store.UpdateArtist(a.ID, map[string]any{"overview": overview})
+		_, _ = m.store.UpdateArtist(ctx, a.ID, map[string]any{"overview": overview})
 	}
 	for _, rg := range resp.GetReleaseGroups() {
 		if rg == nil || strings.TrimSpace(rg.GetTitle()) == "" {
@@ -37,7 +37,7 @@ func (m *Module) syncArtistMetadataFromMusicBrainz(ctx context.Context, a *Artis
 		if pt := strings.ToLower(strings.TrimSpace(rg.GetPrimaryType())); pt != "" && pt != "album" && pt != "ep" && pt != "single" {
 			continue
 		}
-		_, err := m.store.EnsureAlbum(a.ID, Album{
+		_, err := m.store.EnsureAlbum(ctx, a.ID, Album{
 			Title:         rg.GetTitle(),
 			MusicBrainzID: rg.GetId(),
 			Year:          rg.GetFirstReleaseDateYear(),
@@ -49,17 +49,4 @@ func (m *Module) syncArtistMetadataFromMusicBrainz(ctx context.Context, a *Artis
 	}
 	slog.Info("music metadata synced", "artist", a.Name, "mbid", mbid, "release_groups", len(resp.GetReleaseGroups()))
 	return nil
-}
-
-func (m *Module) searchArtistMetadata(ctx context.Context, query string, limit int32) ([]*musicbrainzv1.ArtistSearchResult, error) {
-	cli, closeFn, err := m.musicBrainzClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer closeFn()
-	resp, err := cli.SearchArtist(ctx, &musicbrainzv1.SearchArtistRequest{Query: query, Limit: limit})
-	if err != nil {
-		return nil, err
-	}
-	return resp.GetArtists(), nil
 }

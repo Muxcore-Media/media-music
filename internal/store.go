@@ -1,7 +1,9 @@
 package internal
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,15 +18,15 @@ type Artist struct {
 	ID               string
 	Name             string
 	MusicBrainzID    string
-	Monitored        bool
 	Path             string
-	HasFile          bool
 	QualityProfileID string
 	RootFolderPath   string
 	Overview         string
 	PosterURL        string
 	CreatedAt        string
 	UpdatedAt        string
+	Monitored        bool
+	HasFile          bool
 }
 
 type Album struct {
@@ -45,9 +47,9 @@ type Track struct {
 	Title     string
 	Path      string
 	Quality   string
-	SizeBytes int64
 	Container string
 	CreatedAt string
+	SizeBytes int64
 }
 
 type Tag struct {
@@ -61,10 +63,10 @@ type MissingAlbum struct {
 	ArtistID         string
 	ArtistName       string
 	Title            string
-	Year             int32
 	MusicBrainzID    string
 	QualityProfileID string
 	RootFolderPath   string
+	Year             int32
 }
 
 // Store persists the music library in SQLite.
@@ -73,7 +75,7 @@ type Store struct {
 }
 
 // OpenStore opens or creates the SQLite database at path (WAL mode).
-func OpenStore(path string) (*Store, error) {
+func OpenStore(ctx context.Context, path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create db directory: %w", err)
 	}
@@ -82,20 +84,20 @@ func OpenStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
-		db.Close()
+	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL`); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("enable WAL: %w", err)
 	}
 	s := &Store{db: db}
-	if err := s.migrate(); err != nil {
-		db.Close()
+	if err := s.migrate(ctx); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
 }
 
-func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
+func (s *Store) migrate(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS artists (
 			id              TEXT PRIMARY KEY,
 			name            TEXT NOT NULL,
@@ -163,7 +165,7 @@ func (s *Store) migrate() error {
 		`ALTER TABLE tracks ADD COLUMN container TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tracks ADD COLUMN created_at TEXT NOT NULL DEFAULT ''`,
 	} {
-		if _, err := s.db.Exec(col); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		if _, err := s.db.ExecContext(ctx, col); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate column: %w", err)
 		}
 	}
@@ -182,7 +184,7 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *Store) AddArtist(a Artist) (*Artist, error) {
+func (s *Store) AddArtist(ctx context.Context, a Artist) (*Artist, error) {
 	if strings.TrimSpace(a.Name) == "" {
 		return nil, fmt.Errorf("artist name required")
 	}
@@ -200,7 +202,7 @@ func (s *Store) AddArtist(a Artist) (*Artist, error) {
 	if a.Monitored {
 		monitored = 1
 	}
-	_, err := s.db.Exec(`
+	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO artists (
 			id, name, musicbrainz_id, monitored, path, has_file,
 			quality_profile_id, root_folder_path, overview, poster_url, created_at, updated_at
@@ -214,8 +216,8 @@ func (s *Store) AddArtist(a Artist) (*Artist, error) {
 	return &out, nil
 }
 
-func (s *Store) GetArtist(id string) (*Artist, error) {
-	row := s.db.QueryRow(`
+func (s *Store) GetArtist(ctx context.Context, id string) (*Artist, error) {
+	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, musicbrainz_id, monitored, path, has_file,
 			quality_profile_id, root_folder_path, overview, poster_url, created_at, updated_at
 		FROM artists WHERE id = ?
@@ -223,12 +225,12 @@ func (s *Store) GetArtist(id string) (*Artist, error) {
 	return scanArtist(row)
 }
 
-func (s *Store) ListArtists(query string) ([]*Artist, error) {
-	items, _, err := s.ListArtistsPage(query, "", 1, 0, "", "")
+func (s *Store) ListArtists(ctx context.Context, query string) ([]*Artist, error) {
+	items, _, err := s.ListArtistsPage(ctx, query, "", 1, 0, "", "")
 	return items, err
 }
 
-func (s *Store) ListArtistsPage(query, tagID string, page, pageSize int, sortBy, sortOrder string) ([]*Artist, int, error) {
+func (s *Store) ListArtistsPage(ctx context.Context, query, tagID string, page, pageSize int, sortBy, sortOrder string) ([]*Artist, int, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -240,6 +242,12 @@ func (s *Store) ListArtistsPage(query, tagID string, page, pageSize int, sortBy,
 	}
 	if sortOrder != "desc" {
 		sortOrder = "asc"
+	}
+	validSortBy := map[string]bool{
+		"name": true, "created_at": true, "updated_at": true, "path": true,
+	}
+	if !validSortBy[sortBy] {
+		sortBy = "name"
 	}
 	base := `FROM artists`
 	var where []string
@@ -257,19 +265,20 @@ func (s *Store) ListArtistsPage(query, tagID string, page, pageSize int, sortBy,
 		clause = " WHERE " + strings.Join(where, " AND ")
 	}
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) `+base+clause, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) `+base+clause, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count artists: %w", err)
 	}
 	offset := (page - 1) * pageSize
+	//nolint:gosec // sortBy is validated against allowlist before use in ORDER BY
 	q := `SELECT id, name, musicbrainz_id, monitored, path, has_file,
 		quality_profile_id, root_folder_path, overview, poster_url, created_at, updated_at ` +
 		base + clause + fmt.Sprintf(` ORDER BY %s %s LIMIT ? OFFSET ?`, sortBy, sortOrder)
 	qargs := append(append([]any{}, args...), pageSize, offset)
-	rows, err := s.db.Query(q, qargs...)
+	rows, err := s.db.QueryContext(ctx, q, qargs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list artists: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]*Artist, 0)
 	for rows.Next() {
 		a, err := scanArtist(rows)
@@ -281,8 +290,8 @@ func (s *Store) ListArtistsPage(query, tagID string, page, pageSize int, sortBy,
 	return out, total, rows.Err()
 }
 
-func (s *Store) RemoveArtist(id string) error {
-	res, err := s.db.Exec(`DELETE FROM artists WHERE id = ?`, id)
+func (s *Store) RemoveArtist(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM artists WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete artist: %w", err)
 	}
@@ -294,18 +303,18 @@ func (s *Store) RemoveArtist(id string) error {
 		return fmt.Errorf("artist %q not found", id)
 	}
 	// Cascades may be off without PRAGMA foreign_keys; clean children explicitly.
-	_, _ = s.db.Exec(`DELETE FROM tracks WHERE artist_id = ?`, id)
-	_, _ = s.db.Exec(`DELETE FROM albums WHERE artist_id = ?`, id)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM tracks WHERE artist_id = ?`, id)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM albums WHERE artist_id = ?`, id)
 	return nil
 }
 
-func (s *Store) AddAlbum(al Album) (*Album, error) {
+func (s *Store) AddAlbum(ctx context.Context, al Album) (*Album, error) {
 	if strings.TrimSpace(al.Title) == "" {
 		return nil, fmt.Errorf("album title required")
 	}
 	var exists string
-	err := s.db.QueryRow(`SELECT id FROM artists WHERE id = ?`, al.ArtistID).Scan(&exists)
-	if err == sql.ErrNoRows {
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM artists WHERE id = ?`, al.ArtistID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("artist %q not found", al.ArtistID)
 	}
 	if err != nil {
@@ -318,7 +327,7 @@ func (s *Store) AddAlbum(al Album) (*Album, error) {
 	if al.Monitored {
 		monitored = 1
 	}
-	_, err = s.db.Exec(`
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO albums (id, artist_id, title, musicbrainz_id, year, monitored)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, al.ID, al.ArtistID, al.Title, al.MusicBrainzID, al.Year, monitored)
@@ -329,18 +338,18 @@ func (s *Store) AddAlbum(al Album) (*Album, error) {
 	return &out, nil
 }
 
-func (s *Store) ListAlbums(artistID string) ([]*Album, error) {
+func (s *Store) ListAlbums(ctx context.Context, artistID string) ([]*Album, error) {
 	var (
 		rows *sql.Rows
 		err  error
 	)
 	if artistID != "" {
-		rows, err = s.db.Query(`
+		rows, err = s.db.QueryContext(ctx, `
 			SELECT id, artist_id, title, musicbrainz_id, year, monitored, has_file
 			FROM albums WHERE artist_id = ? ORDER BY year, title
 		`, artistID)
 	} else {
-		rows, err = s.db.Query(`
+		rows, err = s.db.QueryContext(ctx, `
 			SELECT id, artist_id, title, musicbrainz_id, year, monitored, has_file
 			FROM albums ORDER BY title
 		`)
@@ -348,7 +357,7 @@ func (s *Store) ListAlbums(artistID string) ([]*Album, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list albums: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]*Album, 0)
 	for rows.Next() {
 		al, err := scanAlbum(rows)
@@ -361,23 +370,23 @@ func (s *Store) ListAlbums(artistID string) ([]*Album, error) {
 }
 
 // ListTracks returns tracks, optionally filtered by album or artist ID.
-func (s *Store) ListTracks(albumID, artistID string) ([]*Track, error) {
+func (s *Store) ListTracks(ctx context.Context, albumID, artistID string) ([]*Track, error) {
 	var (
 		rows *sql.Rows
 		err  error
 	)
 	if albumID != "" {
-		rows, err = s.db.Query(`
+		rows, err = s.db.QueryContext(ctx, `
 			SELECT id, album_id, artist_id, title, path, quality, size_bytes, container, created_at
 			FROM tracks WHERE album_id = ? ORDER BY title
 		`, albumID)
 	} else if artistID != "" {
-		rows, err = s.db.Query(`
+		rows, err = s.db.QueryContext(ctx, `
 			SELECT id, album_id, artist_id, title, path, quality, size_bytes, container, created_at
 			FROM tracks WHERE artist_id = ? ORDER BY title
 		`, artistID)
 	} else {
-		rows, err = s.db.Query(`
+		rows, err = s.db.QueryContext(ctx, `
 			SELECT id, album_id, artist_id, title, path, quality, size_bytes, container, created_at
 			FROM tracks ORDER BY title
 		`)
@@ -385,7 +394,7 @@ func (s *Store) ListTracks(albumID, artistID string) ([]*Track, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list tracks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]*Track, 0)
 	for rows.Next() {
 		t, err := scanTrack(rows)
@@ -397,8 +406,8 @@ func (s *Store) ListTracks(albumID, artistID string) ([]*Track, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) findAlbum(artistID, title string) (*Album, error) {
-	row := s.db.QueryRow(`
+func (s *Store) findAlbum(ctx context.Context, artistID, title string) (*Album, error) {
+	row := s.db.QueryRowContext(ctx, `
 		SELECT id, artist_id, title, musicbrainz_id, year, monitored, has_file FROM albums
 		WHERE artist_id = ? AND lower(title) = lower(?) LIMIT 1
 	`, artistID, title)
@@ -412,8 +421,8 @@ func (s *Store) findAlbum(artistID, title string) (*Album, error) {
 	return al, nil
 }
 
-func (s *Store) findTrackByPath(path string) (*Track, error) {
-	row := s.db.QueryRow(`
+func (s *Store) findTrackByPath(ctx context.Context, path string) (*Track, error) {
+	row := s.db.QueryRowContext(ctx, `
 		SELECT id, album_id, artist_id, title, path, quality, size_bytes, container, created_at FROM tracks WHERE path = ?
 	`, path)
 	t, err := scanTrack(row)
@@ -426,17 +435,17 @@ func (s *Store) findTrackByPath(path string) (*Track, error) {
 	return t, nil
 }
 
-func (s *Store) upsertTrack(t Track) (*Track, error) {
-	existing, err := s.findTrackByPath(t.Path)
+func (s *Store) upsertTrack(ctx context.Context, t Track) (*Track, error) {
+	existing, err := s.findTrackByPath(ctx, t.Path)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		_, err := s.db.Exec(`
+		_, execErr := s.db.ExecContext(ctx, `
 			UPDATE tracks SET album_id = ?, artist_id = ?, title = ?, quality = ?, size_bytes = ?, container = ? WHERE id = ?
 		`, t.AlbumID, t.ArtistID, t.Title, t.Quality, t.SizeBytes, t.Container, existing.ID)
-		if err != nil {
-			return nil, fmt.Errorf("update track: %w", err)
+		if execErr != nil {
+			return nil, fmt.Errorf("update track: %w", execErr)
 		}
 		existing.AlbumID = t.AlbumID
 		existing.ArtistID = t.ArtistID
@@ -444,8 +453,8 @@ func (s *Store) upsertTrack(t Track) (*Track, error) {
 		existing.Quality = t.Quality
 		existing.SizeBytes = t.SizeBytes
 		existing.Container = t.Container
-		_ = s.refreshAlbumHasFile(t.AlbumID)
-		_ = s.refreshArtistHasFile(t.ArtistID)
+		_ = s.refreshAlbumHasFile(ctx, t.AlbumID)
+		_ = s.refreshArtistHasFile(ctx, t.ArtistID)
 		return existing, nil
 	}
 	if t.ID == "" {
@@ -454,15 +463,15 @@ func (s *Store) upsertTrack(t Track) (*Track, error) {
 	if t.CreatedAt == "" {
 		t.CreatedAt = nowRFC3339()
 	}
-	_, err = s.db.Exec(`
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO tracks (id, album_id, artist_id, title, path, quality, size_bytes, container, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, t.ID, t.AlbumID, t.ArtistID, t.Title, t.Path, t.Quality, t.SizeBytes, t.Container, t.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert track: %w", err)
 	}
-	_ = s.refreshAlbumHasFile(t.AlbumID)
-	_ = s.refreshArtistHasFile(t.ArtistID)
+	_ = s.refreshAlbumHasFile(ctx, t.AlbumID)
+	_ = s.refreshArtistHasFile(ctx, t.ArtistID)
 	out := t
 	return &out, nil
 }
@@ -478,7 +487,7 @@ func scanArtist(row rowScanner) (*Artist, error) {
 		&a.ID, &a.Name, &a.MusicBrainzID, &monitored, &a.Path, &hasFile,
 		&a.QualityProfileID, &a.RootFolderPath, &a.Overview, &a.PosterURL, &a.CreatedAt, &a.UpdatedAt,
 	); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("artist not found")
 		}
 		return nil, err
@@ -492,7 +501,7 @@ func scanAlbum(row rowScanner) (*Album, error) {
 	var al Album
 	var monitored, hasFile int
 	if err := row.Scan(&al.ID, &al.ArtistID, &al.Title, &al.MusicBrainzID, &al.Year, &monitored, &hasFile); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("album not found")
 		}
 		return nil, err
@@ -508,7 +517,7 @@ func scanTrack(row rowScanner) (*Track, error) {
 		&t.ID, &t.AlbumID, &t.ArtistID, &t.Title, &t.Path,
 		&t.Quality, &t.SizeBytes, &t.Container, &t.CreatedAt,
 	); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("track not found")
 		}
 		return nil, err

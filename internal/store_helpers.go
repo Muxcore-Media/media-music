@@ -1,41 +1,43 @@
 package internal
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-func (s *Store) refreshArtistHasFile(artistID string) error {
+func (s *Store) refreshArtistHasFile(ctx context.Context, artistID string) error {
 	var n int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tracks WHERE artist_id = ?`, artistID).Scan(&n); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tracks WHERE artist_id = ?`, artistID).Scan(&n); err != nil {
 		return err
 	}
 	has := 0
 	if n > 0 {
 		has = 1
 	}
-	_, err := s.db.Exec(`UPDATE artists SET has_file = ?, updated_at = ? WHERE id = ?`, has, nowRFC3339(), artistID)
+	_, err := s.db.ExecContext(ctx, `UPDATE artists SET has_file = ?, updated_at = ? WHERE id = ?`, has, nowRFC3339(), artistID)
 	return err
 }
 
-func (s *Store) refreshAlbumHasFile(albumID string) error {
+func (s *Store) refreshAlbumHasFile(ctx context.Context, albumID string) error {
 	var n int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tracks WHERE album_id = ?`, albumID).Scan(&n); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tracks WHERE album_id = ?`, albumID).Scan(&n); err != nil {
 		return err
 	}
 	has := 0
 	if n > 0 {
 		has = 1
 	}
-	_, err := s.db.Exec(`UPDATE albums SET has_file = ? WHERE id = ?`, has, albumID)
+	_, err := s.db.ExecContext(ctx, `UPDATE albums SET has_file = ? WHERE id = ?`, has, albumID)
 	return err
 }
 
-func (s *Store) UpdateArtist(id string, fields map[string]any) (*Artist, error) {
-	a, err := s.GetArtist(id)
+func (s *Store) UpdateArtist(ctx context.Context, id string, fields map[string]any) (*Artist, error) {
+	a, err := s.GetArtist(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -59,22 +61,22 @@ func (s *Store) UpdateArtist(id string, fields map[string]any) (*Artist, error) 
 		monitored = 1
 	}
 	a.UpdatedAt = nowRFC3339()
-	_, err = s.db.Exec(`
+	_, err = s.db.ExecContext(ctx, `
 		UPDATE artists SET name = ?, overview = ?, quality_profile_id = ?, root_folder_path = ?,
 			monitored = ?, updated_at = ? WHERE id = ?
 	`, a.Name, a.Overview, a.QualityProfileID, a.RootFolderPath, monitored, a.UpdatedAt, id)
 	if err != nil {
 		return nil, fmt.Errorf("update artist: %w", err)
 	}
-	return s.GetArtist(id)
+	return s.GetArtist(ctx, id)
 }
 
-func (s *Store) UpdateAlbumMonitored(albumID string, monitored bool) error {
+func (s *Store) UpdateAlbumMonitored(ctx context.Context, albumID string, monitored bool) error {
 	m := 0
 	if monitored {
 		m = 1
 	}
-	res, err := s.db.Exec(`UPDATE albums SET monitored = ? WHERE id = ?`, m, albumID)
+	res, err := s.db.ExecContext(ctx, `UPDATE albums SET monitored = ? WHERE id = ?`, m, albumID)
 	if err != nil {
 		return err
 	}
@@ -85,32 +87,32 @@ func (s *Store) UpdateAlbumMonitored(albumID string, monitored bool) error {
 	return nil
 }
 
-func (s *Store) GetTrack(id string) (*Track, error) {
-	row := s.db.QueryRow(`
+func (s *Store) GetTrack(ctx context.Context, id string) (*Track, error) {
+	row := s.db.QueryRowContext(ctx, `
 		SELECT id, album_id, artist_id, title, path, quality, size_bytes, container, created_at
 		FROM tracks WHERE id = ?
 	`, id)
 	return scanTrack(row)
 }
 
-func (s *Store) RemoveTrack(id string, deleteFile bool) error {
-	t, err := s.GetTrack(id)
+func (s *Store) RemoveTrack(ctx context.Context, id string, deleteFile bool) error {
+	t, err := s.GetTrack(ctx, id)
 	if err != nil {
 		return err
 	}
 	if deleteFile && t.Path != "" {
 		_ = os.Remove(t.Path)
 	}
-	if _, err := s.db.Exec(`DELETE FROM tracks WHERE id = ?`, id); err != nil {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM tracks WHERE id = ?`, id); err != nil {
 		return err
 	}
-	_ = s.refreshAlbumHasFile(t.AlbumID)
-	_ = s.refreshArtistHasFile(t.ArtistID)
+	_ = s.refreshAlbumHasFile(ctx, t.AlbumID)
+	_ = s.refreshArtistHasFile(ctx, t.ArtistID)
 	return nil
 }
 
-func (s *Store) AddTrackFile(albumID, filePath, title, quality, container string, size int64) (*Track, error) {
-	al, err := s.findAlbumByID(albumID)
+func (s *Store) AddTrackFile(ctx context.Context, albumID, filePath, title, quality, container string, size int64) (*Track, error) {
+	al, err := s.findAlbumByID(ctx, albumID)
 	if err != nil {
 		return nil, err
 	}
@@ -120,20 +122,20 @@ func (s *Store) AddTrackFile(albumID, filePath, title, quality, container string
 	if title == "" {
 		title = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
 	}
-	return s.upsertTrack(Track{
+	return s.upsertTrack(ctx, Track{
 		AlbumID: al.ID, ArtistID: al.ArtistID, Title: title, Path: filePath,
 		Quality: quality, SizeBytes: size, Container: container,
 	})
 }
 
-func (s *Store) findAlbumByID(id string) (*Album, error) {
-	row := s.db.QueryRow(`
+func (s *Store) findAlbumByID(ctx context.Context, id string) (*Album, error) {
+	row := s.db.QueryRowContext(ctx, `
 		SELECT id, artist_id, title, musicbrainz_id, year, monitored, has_file FROM albums WHERE id = ?
 	`, id)
 	return scanAlbum(row)
 }
 
-func (s *Store) ListMissing(page, pageSize int, artistID string) ([]*MissingAlbum, int, error) {
+func (s *Store) ListMissing(ctx context.Context, page, pageSize int, artistID string) ([]*MissingAlbum, int, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -150,7 +152,7 @@ func (s *Store) ListMissing(page, pageSize int, artistID string) ([]*MissingAlbu
 		args = append(args, artistID)
 	}
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) `+base, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) `+base, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	offset := (page - 1) * pageSize
@@ -158,11 +160,11 @@ func (s *Store) ListMissing(page, pageSize int, artistID string) ([]*MissingAlbu
 		ar.quality_profile_id, ar.root_folder_path ` + base +
 		` ORDER BY ar.name, al.year, al.title LIMIT ? OFFSET ?`
 	qargs := append(append([]any{}, args...), pageSize, offset)
-	rows, err := s.db.Query(q, qargs...)
+	rows, err := s.db.QueryContext(ctx, q, qargs...)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]*MissingAlbum, 0)
 	for rows.Next() {
 		var m MissingAlbum
@@ -175,13 +177,13 @@ func (s *Store) ListMissing(page, pageSize int, artistID string) ([]*MissingAlbu
 	return out, total, rows.Err()
 }
 
-func (s *Store) appendHistory(itemID, eventType, sourceTitle, quality string) {
-	_, _ = s.db.Exec(`INSERT INTO history (item_id, event_type, source_title, quality, date) VALUES (?, ?, ?, ?, ?)`,
+func (s *Store) appendHistory(ctx context.Context, itemID, eventType, sourceTitle, quality string) {
+	_, _ = s.db.ExecContext(ctx, `INSERT INTO history (item_id, event_type, source_title, quality, date) VALUES (?, ?, ?, ?, ?)`,
 		itemID, eventType, sourceTitle, quality, nowRFC3339())
 }
 
-func (s *Store) findArtistByName(name string) (*Artist, error) {
-	row := s.db.QueryRow(`
+func (s *Store) findArtistByName(ctx context.Context, name string) (*Artist, error) {
+	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, musicbrainz_id, monitored, path, has_file,
 			quality_profile_id, root_folder_path, overview, poster_url, created_at, updated_at
 		FROM artists WHERE lower(name) = lower(?) LIMIT 1
@@ -196,7 +198,7 @@ func (s *Store) findArtistByName(name string) (*Artist, error) {
 	return a, nil
 }
 
-func (s *Store) scanHistory(page, pageSize int, itemID, eventType string) ([]map[string]string, int, error) {
+func (s *Store) scanHistory(ctx context.Context, page, pageSize int, itemID, eventType string) ([]map[string]string, int, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -219,16 +221,16 @@ func (s *Store) scanHistory(page, pageSize int, itemID, eventType string) ([]map
 		clause = " WHERE " + strings.Join(where, " AND ")
 	}
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) `+base+clause, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) `+base+clause, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	offset := (page - 1) * pageSize
-	rows, err := s.db.Query(`SELECT item_id, event_type, source_title, quality, date `+base+clause+
+	rows, err := s.db.QueryContext(ctx, `SELECT item_id, event_type, source_title, quality, date `+base+clause+
 		` ORDER BY date DESC LIMIT ? OFFSET ?`, append(append([]any{}, args...), pageSize, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]map[string]string, 0)
 	for rows.Next() {
 		var itemID, ev, src, qual, date string
@@ -242,28 +244,21 @@ func (s *Store) scanHistory(page, pageSize int, itemID, eventType string) ([]map
 	return out, total, rows.Err()
 }
 
-func nullableString(v sql.NullString) string {
-	if v.Valid {
-		return v.String
-	}
-	return ""
-}
-
 // EnsureAlbum inserts or updates an album keyed by MusicBrainz release-group ID.
-func (s *Store) EnsureAlbum(artistID string, al Album) (*Album, error) {
+func (s *Store) EnsureAlbum(ctx context.Context, artistID string, al Album) (*Album, error) {
 	if strings.TrimSpace(al.Title) == "" {
 		return nil, fmt.Errorf("album title required")
 	}
 	mbid := strings.TrimSpace(al.MusicBrainzID)
 	if mbid != "" {
 		var existingID string
-		err := s.db.QueryRow(`SELECT id FROM albums WHERE artist_id = ? AND musicbrainz_id = ?`, artistID, mbid).Scan(&existingID)
+		err := s.db.QueryRowContext(ctx, `SELECT id FROM albums WHERE artist_id = ? AND musicbrainz_id = ?`, artistID, mbid).Scan(&existingID)
 		if err == nil {
 			monitored := 0
 			if al.Monitored {
 				monitored = 1
 			}
-			_, err = s.db.Exec(`UPDATE albums SET title = ?, year = ?, monitored = ? WHERE id = ?`,
+			_, err = s.db.ExecContext(ctx, `UPDATE albums SET title = ?, year = ?, monitored = ? WHERE id = ?`,
 				al.Title, al.Year, monitored, existingID)
 			if err != nil {
 				return nil, fmt.Errorf("update album: %w", err)
@@ -272,10 +267,10 @@ func (s *Store) EnsureAlbum(artistID string, al Album) (*Album, error) {
 			al.ArtistID = artistID
 			return &al, nil
 		}
-		if err != sql.ErrNoRows {
+		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
 	}
 	al.ArtistID = artistID
-	return s.AddAlbum(al)
+	return s.AddAlbum(ctx, al)
 }
