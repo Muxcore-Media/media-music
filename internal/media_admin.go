@@ -12,7 +12,7 @@ import (
 	musicv1 "github.com/Muxcore-Media/media-music/proto/gen/muxcore/music/v1"
 )
 
-func (m *Module) GetMediaTypeInfo(_ context.Context, _ *mediaadminv1.GetMediaTypeInfoRequest) (*mediaadminv1.GetMediaTypeInfoResponse, error) {
+func (m *Module) GetMediaTypeInfo(ctx context.Context, _ *mediaadminv1.GetMediaTypeInfoRequest) (*mediaadminv1.GetMediaTypeInfoResponse, error) {
 	return &mediaadminv1.GetMediaTypeInfoResponse{
 		DisplayName: "Music",
 		Icon:        "🎵",
@@ -36,7 +36,7 @@ func (m *Module) ListItems(ctx context.Context, req *mediaadminv1.ListItemsReque
 	if pageSize < 1 || pageSize > 100 {
 		pageSize = 20
 	}
-	items, total, err := m.store.ListArtistsPage(req.GetSearch(), req.GetTagId(), page, pageSize, req.GetSortBy(), req.GetSortOrder())
+	items, total, err := m.store.ListArtistsPage(ctx, req.GetSearch(), req.GetTagId(), page, pageSize, req.GetSortBy(), req.GetSortOrder())
 	if err != nil {
 		return nil, err
 	}
@@ -45,12 +45,12 @@ func (m *Module) ListItems(ctx context.Context, req *mediaadminv1.ListItemsReque
 		out = append(out, m.artistToMediaItem(a))
 	}
 	return &mediaadminv1.ListItemsResponse{
-		Items: out, Total: int32(total), Page: int32(page), PageSize: int32(pageSize),
+		Items: out, Total: int32FromInt(total), Page: int32FromInt(page), PageSize: int32FromInt(pageSize),
 	}, nil
 }
 
 func (m *Module) GetItem(ctx context.Context, req *mediaadminv1.GetItemRequest) (*mediaadminv1.GetItemResponse, error) {
-	a, err := mustArtist(m.store, req.GetId())
+	a, err := mustArtist(ctx, m.store, req.GetId())
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "%v", err)
 	}
@@ -72,15 +72,15 @@ func (m *Module) UpdateMetadata(ctx context.Context, req *mediaadminv1.UpdateMet
 			fields["monitored"] = v == "true" || v == "1"
 		}
 	}
-	a, err := m.store.UpdateArtist(req.GetId(), fields)
+	a, err := m.store.UpdateArtist(ctx, req.GetId(), fields)
 	if err != nil {
 		return nil, err
 	}
 	return &mediaadminv1.UpdateMetadataResponse{Item: m.artistToMediaItem(a)}, nil
 }
 
-func (m *Module) ListArtwork(_ context.Context, req *mediaadminv1.ListArtworkRequest) (*mediaadminv1.ListArtworkResponse, error) {
-	a, err := mustArtist(m.store, req.GetId())
+func (m *Module) ListArtwork(ctx context.Context, req *mediaadminv1.ListArtworkRequest) (*mediaadminv1.ListArtworkResponse, error) {
+	a, err := mustArtist(ctx, m.store, req.GetId())
 	if err != nil {
 		return nil, err
 	}
@@ -95,8 +95,8 @@ func (m *Module) ReplaceArtwork(_ mediaadminv1.MediaAdminService_ReplaceArtworkS
 	return status.Error(codes.Unimplemented, "artwork upload not supported for music yet")
 }
 
-func (m *Module) DeleteItem(_ context.Context, req *mediaadminv1.DeleteItemRequest) (*mediaadminv1.DeleteItemResponse, error) {
-	if err := m.store.RemoveArtist(req.GetId()); err != nil {
+func (m *Module) DeleteItem(ctx context.Context, req *mediaadminv1.DeleteItemRequest) (*mediaadminv1.DeleteItemResponse, error) {
+	if err := m.store.RemoveArtist(ctx, req.GetId()); err != nil {
 		return nil, err
 	}
 	return &mediaadminv1.DeleteItemResponse{}, nil

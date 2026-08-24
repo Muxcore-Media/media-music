@@ -1,6 +1,7 @@
 package internal_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,13 +12,14 @@ import (
 // TestScanLibraryRootFixtures walks local stub audio files under testdata/library.
 // Files are empty stubs (no paid metadata APIs).
 func TestScanLibraryRootFixtures(t *testing.T) {
+	ctx := context.Background()
 	root := filepath.Join("testdata", "library")
 	if _, err := os.Stat(root); err != nil {
 		t.Fatalf("fixture library missing: %v", err)
 	}
 
 	s, _ := openTempStore(t)
-	res, err := s.ScanLibraryRoot(root)
+	res, err := s.ScanLibraryRoot(ctx, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +31,7 @@ func TestScanLibraryRootFixtures(t *testing.T) {
 		t.Fatalf("expected imports, got %+v", res)
 	}
 
-	artists, err := s.ListArtists("")
+	artists, err := s.ListArtists(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,14 +48,14 @@ func TestScanLibraryRootFixtures(t *testing.T) {
 	if fixtureArtist == nil {
 		t.Fatalf("Fixture Artist not found: %+v", artists)
 	}
-	albums, err := s.ListAlbums(fixtureArtist.ID)
+	albums, err := s.ListAlbums(ctx, fixtureArtist.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(albums) < 1 {
 		t.Fatal("expected album from fixtures")
 	}
-	tracks, err := s.ListTracks(albums[0].ID, "")
+	tracks, err := s.ListTracks(ctx, albums[0].ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +64,7 @@ func TestScanLibraryRootFixtures(t *testing.T) {
 	}
 
 	// Idempotent rescan should skip already-imported paths.
-	res2, err := s.ScanLibraryRoot(root)
+	res2, err := s.ScanLibraryRoot(ctx, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +78,7 @@ func TestScanLibraryRootFixtures(t *testing.T) {
 
 func TestScanLibraryRootMissing(t *testing.T) {
 	s, _ := openTempStore(t)
-	_, err := s.ScanLibraryRoot(filepath.Join(t.TempDir(), "does-not-exist"))
+	_, err := s.ScanLibraryRoot(context.Background(), filepath.Join(t.TempDir(), "does-not-exist"))
 	if err == nil {
 		t.Fatal("expected error for missing root")
 	}

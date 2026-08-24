@@ -9,34 +9,32 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 
+	automationv1 "github.com/Muxcore-Media/contracts-automation/muxcore/automation/v1"
 	mediaadminv1 "github.com/Muxcore-Media/contracts-media-admin/gen/muxcore/media/admin/v1"
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	"github.com/Muxcore-Media/core/sdk/go/client"
-	automationv1 "github.com/Muxcore-Media/contracts-automation/muxcore/automation/v1"
 	musicv1 "github.com/Muxcore-Media/media-music/proto/gen/muxcore/music/v1"
 )
 
 type Module struct {
-	mu    sync.RWMutex
-	cfgMu sync.RWMutex
-	store *Store
-	mc    *client.Client
-
-	id         string
-	dataDir    string
-	libraryDir string
-	grpcAddr   string
-	httpAddr   string
-
-	grpcSrv *grpc.Server
-	grpcLis net.Listener
-	httpSrv *http.Server
-	httpLis net.Listener
-
+	grpcLis            net.Listener
+	httpLis            net.Listener
+	grpcSrv            *grpc.Server
+	mc                 *client.Client
+	store              *Store
+	httpSrv            *http.Server
 	automationSearchFn func(ctx context.Context, req *automationv1.SearchItemRequest) (*automationv1.SearchItemResponse, error)
+	id                 string
+	dataDir            string
+	libraryDir         string
+	grpcAddr           string
+	httpAddr           string
+	mu                 sync.RWMutex
+	cfgMu              sync.RWMutex
 }
 
 type Config struct {
@@ -104,20 +102,21 @@ func (m *Module) Init(ctx context.Context) error {
 		return fmt.Errorf("create library dir: %w", err)
 	}
 	dbPath := filepath.Join(m.dataDir, "music.db")
-	store, err := OpenStore(dbPath)
+	store, err := OpenStore(ctx, dbPath)
 	if err != nil {
 		return err
 	}
 	m.store = store
 
-	lis, err := net.Listen("tcp", m.grpcAddr)
+	lc := net.ListenConfig{}
+	lis, err := lc.Listen(ctx, "tcp", m.grpcAddr)
 	if err != nil {
 		return fmt.Errorf("listen gRPC %s: %w", m.grpcAddr, err)
 	}
 	m.grpcLis = lis
 	m.grpcAddr = lis.Addr().String()
 
-	httpLis, err := net.Listen("tcp", m.httpAddr)
+	httpLis, err := lc.Listen(ctx, "tcp", m.httpAddr)
 	if err != nil {
 		return fmt.Errorf("listen HTTP %s: %w", m.httpAddr, err)
 	}
@@ -150,7 +149,10 @@ func (m *Module) Start(ctx context.Context) error {
 		_, _ = w.Write([]byte("ok"))
 	})
 	m.registerMusicHTTPAPI(mux)
-	m.httpSrv = &http.Server{Handler: mux}
+	m.httpSrv = &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	go func() {
 		slog.Info("health listening", "addr", m.httpAddr)
 		if err := m.httpSrv.Serve(m.httpLis); err != nil && err != http.ErrServerClosed {
@@ -158,8 +160,8 @@ func (m *Module) Start(ctx context.Context) error {
 		}
 	}()
 
-	go m.dialCore(context.Background())
-	go m.subscribeToFileImported()
+	go m.dialCore(ctx)
+	go m.subscribeToFileImported(ctx)
 	return nil
 }
 
@@ -220,7 +222,7 @@ func (m *Module) ScanLibrary() (*ScanResult, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store not open")
 	}
-	return store.ScanLibraryRoot(root)
+	return store.ScanLibraryRoot(context.Background(), root)
 }
 
 func (m *Module) GRPCListenAddr() string { return m.grpcAddr }

@@ -12,7 +12,7 @@ import (
 	"github.com/Muxcore-Media/core/pkg/contracts"
 )
 
-func (m *Module) subscribeToFileImported() {
+func (m *Module) subscribeToFileImported(ctx context.Context) {
 	time.Sleep(15 * time.Second)
 	m.mu.RLock()
 	mc := m.mc
@@ -20,7 +20,7 @@ func (m *Module) subscribeToFileImported() {
 	if mc == nil {
 		return
 	}
-	ch, cancel, err := mc.Events.Subscribe(context.Background(), contracts.EventFileImported)
+	ch, cancel, err := mc.Events.Subscribe(ctx, contracts.EventFileImported)
 	if err != nil {
 		slog.Warn("media-music: subscribe file imported", "error", err)
 		return
@@ -34,7 +34,7 @@ func (m *Module) subscribeToFileImported() {
 			if !isMusicMediaType(p.MediaType) {
 				continue
 			}
-			if err := m.handleMusicFileImported(context.Background(), p); err != nil {
+			if err := m.handleMusicFileImported(ctx, p); err != nil {
 				slog.Debug("media-music: handle imported file", "title", p.Title, "error", err)
 			}
 		}
@@ -52,7 +52,7 @@ func isMusicMediaType(t string) bool {
 	}
 }
 
-func (m *Module) handleMusicFileImported(_ context.Context, p contracts.FileImportedPayload) error {
+func (m *Module) handleMusicFileImported(ctx context.Context, p contracts.FileImportedPayload) error {
 	if m.store == nil {
 		return errNotInit
 	}
@@ -77,22 +77,22 @@ func (m *Module) handleMusicFileImported(_ context.Context, p contracts.FileImpo
 	if p.Title != "" {
 		trackTitle = p.Title
 	}
-	ar, err := m.store.findArtistByName(artistName)
+	ar, err := m.store.findArtistByName(ctx, artistName)
 	if err != nil {
 		return err
 	}
 	if ar == nil {
-		ar, err = m.store.AddArtist(Artist{Name: artistName, Monitored: true, Path: filepath.Dir(filepath.Dir(path))})
+		ar, err = m.store.AddArtist(ctx, Artist{Name: artistName, Monitored: true, Path: filepath.Dir(filepath.Dir(path))})
 		if err != nil {
 			return err
 		}
 	}
-	al, err := m.store.findAlbum(ar.ID, albumTitle)
+	al, err := m.store.findAlbum(ctx, ar.ID, albumTitle)
 	if err != nil {
 		return err
 	}
 	if al == nil {
-		al, err = m.store.AddAlbum(Album{ArtistID: ar.ID, Title: albumTitle, Monitored: true})
+		al, err = m.store.AddAlbum(ctx, Album{ArtistID: ar.ID, Title: albumTitle, Monitored: true})
 		if err != nil {
 			return err
 		}
@@ -101,10 +101,10 @@ func (m *Module) handleMusicFileImported(_ context.Context, p contracts.FileImpo
 	if quality == "" {
 		quality = "unknown"
 	}
-	_, err = m.store.AddTrackFile(al.ID, path, trackTitle, quality, trackContainer(path), st.Size())
+	_, err = m.store.AddTrackFile(ctx, al.ID, path, trackTitle, quality, trackContainer(path), st.Size())
 	if err != nil {
 		return err
 	}
-	m.store.appendHistory(ar.ID, "trackFileImported", trackTitle, quality)
+	m.store.appendHistory(ctx, ar.ID, "trackFileImported", trackTitle, quality)
 	return nil
 }
