@@ -16,6 +16,10 @@ const (
 	meshMethodGetArtist   = "GetArtist"
 )
 
+func meshResponseErr(msg string) (*meshv1.CallResponse, error) {
+	return &meshv1.CallResponse{Error: msg}, nil
+}
+
 type listArtistsReq struct {
 	Query string `json:"query"`
 }
@@ -28,8 +32,8 @@ type artistJSON struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	MusicBrainzID string `json:"musicbrainz_id"`
-	Monitored     bool   `json:"monitored"`
 	Path          string `json:"path"`
+	Monitored     bool   `json:"monitored"`
 }
 
 type albumJSON struct {
@@ -37,9 +41,9 @@ type albumJSON struct {
 	ArtistID      string      `json:"artist_id"`
 	Title         string      `json:"title"`
 	MusicBrainzID string      `json:"musicbrainz_id"`
+	Tracks        []trackJSON `json:"tracks,omitempty"`
 	Year          int32       `json:"year"`
 	Monitored     bool        `json:"monitored"`
-	Tracks        []trackJSON `json:"tracks,omitempty"`
 }
 
 type trackJSON struct {
@@ -60,9 +64,9 @@ type artistDetailJSON struct {
 // so admin-ui can soft-proxy without a MusicManagementService client dependency.
 type musicMeshServer struct {
 	meshv1.UnimplementedModuleMeshServer
-	moduleID string
 	settings modulesdk.SettingsHandler
 	m        *Module
+	moduleID string
 }
 
 func registerMusicMesh(srv *grpc.Server, moduleID string, m *Module) {
@@ -75,22 +79,22 @@ func registerMusicMesh(srv *grpc.Server, moduleID string, m *Module) {
 
 func (s *musicMeshServer) Call(ctx context.Context, req *meshv1.CallRequest) (*meshv1.CallResponse, error) {
 	if req.GetTargetModule() != "" && req.GetTargetModule() != s.moduleID {
-		return &meshv1.CallResponse{Error: fmt.Sprintf("wrong target module %q", req.GetTargetModule())}, nil
+		return meshResponseErr(fmt.Sprintf("wrong target module %q", req.GetTargetModule()))
 	}
 	switch req.GetMethod() {
 	case "Settings":
 		if s.settings.List == nil {
-			return &meshv1.CallResponse{Error: "settings list not implemented"}, nil
+			return meshResponseErr("settings list not implemented")
 		}
 		defs := s.settings.List()
 		raw, err := json.Marshal(defs)
 		if err != nil {
-			return &meshv1.CallResponse{Error: err.Error()}, nil
+			return meshResponseErr(err.Error())
 		}
 		return &meshv1.CallResponse{Payload: raw}, nil
 	case "UpdateSetting":
 		if s.settings.Update == nil {
-			return &meshv1.CallResponse{Error: "settings update not implemented"}, nil
+			return meshResponseErr("settings update not implemented")
 		}
 		var body struct {
 			Key   string `json:"Key"`
@@ -98,22 +102,22 @@ func (s *musicMeshServer) Call(ctx context.Context, req *meshv1.CallRequest) (*m
 		}
 		if len(req.GetPayload()) > 0 {
 			if err := json.Unmarshal(req.GetPayload(), &body); err != nil {
-				return &meshv1.CallResponse{Error: fmt.Sprintf("invalid UpdateSetting payload: %v", err)}, nil
+				return meshResponseErr(fmt.Sprintf("invalid UpdateSetting payload: %v", err))
 			}
 		}
 		if body.Key == "" {
-			return &meshv1.CallResponse{Error: "UpdateSetting requires Key"}, nil
+			return meshResponseErr("UpdateSetting requires Key")
 		}
 		if err := s.settings.Update(body.Key, body.Value); err != nil {
-			return &meshv1.CallResponse{Error: err.Error()}, nil
+			return meshResponseErr(err.Error())
 		}
 		return &meshv1.CallResponse{Payload: []byte(`{"ok":true}`)}, nil
 	case meshMethodListArtists:
-		return s.listArtists(req.GetPayload())
+		return s.listArtists(ctx, req.GetPayload())
 	case meshMethodGetArtist:
-		return s.getArtist(req.GetPayload())
+		return s.getArtist(ctx, req.GetPayload())
 	default:
-		return &meshv1.CallResponse{Error: fmt.Sprintf("unknown method %q", req.GetMethod())}, nil
+		return meshResponseErr(fmt.Sprintf("unknown method %q", req.GetMethod()))
 	}
 }
 
@@ -121,19 +125,19 @@ func (s *musicMeshServer) StreamCall(stream meshv1.ModuleMesh_StreamCallServer) 
 	return fmt.Errorf("StreamCall not supported for music mesh handler")
 }
 
-func (s *musicMeshServer) listArtists(payload []byte) (*meshv1.CallResponse, error) {
+func (s *musicMeshServer) listArtists(ctx context.Context, payload []byte) (*meshv1.CallResponse, error) {
 	var body listArtistsReq
 	if len(payload) > 0 {
 		if err := json.Unmarshal(payload, &body); err != nil {
-			return &meshv1.CallResponse{Error: fmt.Sprintf("invalid ListArtists payload: %v", err)}, nil
+			return meshResponseErr(fmt.Sprintf("invalid ListArtists payload: %v", err))
 		}
 	}
 	if s.m.store == nil {
-		return &meshv1.CallResponse{Error: "store not open"}, nil
+		return meshResponseErr("store not open")
 	}
-	items, err := s.m.store.ListArtists(body.Query)
+	items, err := s.m.store.ListArtists(ctx, body.Query)
 	if err != nil {
-		return &meshv1.CallResponse{Error: err.Error()}, nil
+		return meshResponseErr(err.Error())
 	}
 	out := make([]artistJSON, 0, len(items))
 	for _, a := range items {
@@ -141,39 +145,39 @@ func (s *musicMeshServer) listArtists(payload []byte) (*meshv1.CallResponse, err
 	}
 	raw, err := json.Marshal(out)
 	if err != nil {
-		return &meshv1.CallResponse{Error: err.Error()}, nil
+		return meshResponseErr(err.Error())
 	}
 	return &meshv1.CallResponse{Payload: raw}, nil
 }
 
-func (s *musicMeshServer) getArtist(payload []byte) (*meshv1.CallResponse, error) {
+func (s *musicMeshServer) getArtist(ctx context.Context, payload []byte) (*meshv1.CallResponse, error) {
 	var body getArtistReq
 	if len(payload) > 0 {
 		if err := json.Unmarshal(payload, &body); err != nil {
-			return &meshv1.CallResponse{Error: fmt.Sprintf("invalid GetArtist payload: %v", err)}, nil
+			return meshResponseErr(fmt.Sprintf("invalid GetArtist payload: %v", err))
 		}
 	}
 	if body.ID == "" {
-		return &meshv1.CallResponse{Error: "GetArtist requires id"}, nil
+		return meshResponseErr("GetArtist requires id")
 	}
 	if s.m.store == nil {
-		return &meshv1.CallResponse{Error: "store not open"}, nil
+		return meshResponseErr("store not open")
 	}
-	a, err := s.m.store.GetArtist(body.ID)
+	a, err := s.m.store.GetArtist(ctx, body.ID)
 	if err != nil {
-		return &meshv1.CallResponse{Error: err.Error()}, nil
+		return meshResponseErr(err.Error())
 	}
-	albums, err := s.m.store.ListAlbums(body.ID)
+	albums, err := s.m.store.ListAlbums(ctx, body.ID)
 	if err != nil {
-		return &meshv1.CallResponse{Error: err.Error()}, nil
+		return meshResponseErr(err.Error())
 	}
 	detail := artistDetailJSON{Artist: toArtistJSON(a), Albums: make([]albumJSON, 0, len(albums))}
 	for _, al := range albums {
-		detail.Albums = append(detail.Albums, s.m.albumJSONWithTracks(al))
+		detail.Albums = append(detail.Albums, s.m.albumJSONWithTracks(ctx, al))
 	}
 	raw, err := json.Marshal(detail)
 	if err != nil {
-		return &meshv1.CallResponse{Error: err.Error()}, nil
+		return meshResponseErr(err.Error())
 	}
 	return &meshv1.CallResponse{Payload: raw}, nil
 }
@@ -199,12 +203,12 @@ func toTrackJSON(t *Track) trackJSON {
 	}
 }
 
-func (m *Module) albumJSONWithTracks(al *Album) albumJSON {
+func (m *Module) albumJSONWithTracks(ctx context.Context, al *Album) albumJSON {
 	out := toAlbumJSON(al)
 	if m.store == nil {
 		return out
 	}
-	tracks, err := m.store.ListTracks(al.ID, "")
+	tracks, err := m.store.ListTracks(ctx, al.ID, "")
 	if err != nil {
 		return out
 	}

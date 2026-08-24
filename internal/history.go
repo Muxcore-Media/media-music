@@ -18,7 +18,7 @@ func (m *Module) ListHistory(ctx context.Context, req *mediaadminv1.ListHistoryR
 	if pageSize < 1 {
 		pageSize = 20
 	}
-	rows, total, err := m.store.scanHistory(page, pageSize, req.GetItemId(), req.GetEventType())
+	rows, total, err := m.store.scanHistory(ctx, page, pageSize, req.GetItemId(), req.GetEventType())
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +30,7 @@ func (m *Module) ListHistory(ctx context.Context, req *mediaadminv1.ListHistoryR
 		})
 	}
 	return &mediaadminv1.ListHistoryResponse{
-		Records: records, Total: int32(total), Page: int32(page), PageSize: int32(pageSize),
+		Records: records, Total: int32FromInt(total), Page: int32FromInt(page), PageSize: int32FromInt(pageSize),
 	}, nil
 }
 
