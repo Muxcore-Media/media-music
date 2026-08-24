@@ -15,7 +15,7 @@ import (
 	mediaadminv1 "github.com/Muxcore-Media/contracts-media-admin/gen/muxcore/media/admin/v1"
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	"github.com/Muxcore-Media/core/sdk/go/client"
-	automationv1 "github.com/Muxcore-Media/media-automation/proto/automationv1"
+	automationv1 "github.com/Muxcore-Media/contracts-automation/muxcore/automation/v1"
 	musicv1 "github.com/Muxcore-Media/media-music/proto/gen/muxcore/music/v1"
 )
 
@@ -159,6 +159,7 @@ func (m *Module) Start(ctx context.Context) error {
 	}()
 
 	go m.dialCore(context.Background())
+	go m.subscribeToFileImported()
 	return nil
 }
 

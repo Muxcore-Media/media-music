@@ -248,3 +248,34 @@ func nullableString(v sql.NullString) string {
 	}
 	return ""
 }
+
+// EnsureAlbum inserts or updates an album keyed by MusicBrainz release-group ID.
+func (s *Store) EnsureAlbum(artistID string, al Album) (*Album, error) {
+	if strings.TrimSpace(al.Title) == "" {
+		return nil, fmt.Errorf("album title required")
+	}
+	mbid := strings.TrimSpace(al.MusicBrainzID)
+	if mbid != "" {
+		var existingID string
+		err := s.db.QueryRow(`SELECT id FROM albums WHERE artist_id = ? AND musicbrainz_id = ?`, artistID, mbid).Scan(&existingID)
+		if err == nil {
+			monitored := 0
+			if al.Monitored {
+				monitored = 1
+			}
+			_, err = s.db.Exec(`UPDATE albums SET title = ?, year = ?, monitored = ? WHERE id = ?`,
+				al.Title, al.Year, monitored, existingID)
+			if err != nil {
+				return nil, fmt.Errorf("update album: %w", err)
+			}
+			al.ID = existingID
+			al.ArtistID = artistID
+			return &al, nil
+		}
+		if err != sql.ErrNoRows {
+			return nil, err
+		}
+	}
+	al.ArtistID = artistID
+	return s.AddAlbum(al)
+}
