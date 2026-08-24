@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"log/slog"
 
 	musicv1 "github.com/Muxcore-Media/media-music/proto/gen/muxcore/music/v1"
 )
@@ -44,10 +45,13 @@ func (s *musicServer) RemoveArtist(_ context.Context, req *musicv1.RemoveArtistR
 	return &musicv1.RemoveArtistResponse{}, nil
 }
 
-func (s *musicServer) RefreshMetadata(_ context.Context, req *musicv1.RefreshMetadataRequest) (*musicv1.RefreshMetadataResponse, error) {
+func (s *musicServer) RefreshMetadata(ctx context.Context, req *musicv1.RefreshMetadataRequest) (*musicv1.RefreshMetadataResponse, error) {
 	a, err := s.m.store.GetArtist(req.GetArtistId())
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "%v", err)
+	}
+	if err := s.m.syncArtistMetadataFromMusicBrainz(ctx, a); err != nil {
+		slog.Warn("music metadata refresh", "artist", a.Name, "error", err)
 	}
 	root := a.Path
 	if root == "" {

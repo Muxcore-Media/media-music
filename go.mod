@@ -3,12 +3,13 @@ module github.com/Muxcore-Media/media-music
 go 1.26.5
 
 require (
+	github.com/Muxcore-Media/contracts-automation v0.1.0
 	github.com/Muxcore-Media/contracts-media-admin v0.1.0
-	github.com/Muxcore-Media/core v0.5.4
-	github.com/Muxcore-Media/core/pkg/contracts v0.5.4
-	github.com/Muxcore-Media/core/sdk/go/client v0.5.2
-	github.com/Muxcore-Media/core/sdk/go/module v0.5.2
-	github.com/Muxcore-Media/media-automation v0.1.5
+	github.com/Muxcore-Media/core v0.5.8
+	github.com/Muxcore-Media/core/pkg/contracts v0.5.8
+	github.com/Muxcore-Media/core/sdk/go/client v0.5.8
+	github.com/Muxcore-Media/core/sdk/go/module v0.5.8
+	github.com/Muxcore-Media/metadata-musicbrainz v0.0.0
 	github.com/google/uuid v1.6.0
 	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.11
@@ -31,8 +32,14 @@ require (
 
 replace github.com/Muxcore-Media/contracts-media-admin => ../contracts-media-admin
 
-
-
-
-
 replace github.com/Muxcore-Media/media-automation => ../media-automation
+
+replace github.com/Muxcore-Media/metadata-musicbrainz => ../metadata-musicbrainz
+
+replace github.com/Muxcore-Media/core => ../core
+
+replace github.com/Muxcore-Media/contracts-scanner => ../contracts-scanner
+
+replace github.com/Muxcore-Media/contracts-automation => ../contracts-automation
+
+replace github.com/Muxcore-Media/contracts-metadata => ../contracts-metadata
