@@ -18,14 +18,14 @@ func (m *Module) ListHistory(ctx context.Context, req *mediaadminv1.ListHistoryR
 	if pageSize < 1 {
 		pageSize = 20
 	}
-	rows, total, err := m.store.scanHistory(ctx, page, pageSize, req.GetItemId(), req.GetEventType())
+	rows, total, err := m.store.scanHistory(ctx, page, pageSize, req.GetItemId(), historyEventFilter(req.GetEventType()))
 	if err != nil {
 		return nil, err
 	}
 	records := make([]*mediaadminv1.HistoryRecord, 0, len(rows))
 	for _, r := range rows {
 		records = append(records, &mediaadminv1.HistoryRecord{
-			ItemId: r["item_id"], EventType: r["event_type"],
+			ItemId: r["item_id"], EventType: storeEventToProto(r["event_type"]),
 			SourceTitle: r["source_title"], Quality: r["quality"], CreatedAt: r["date"],
 		})
 	}

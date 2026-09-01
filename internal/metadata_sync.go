@@ -12,11 +12,17 @@ func (m *Module) syncArtistMetadataFromMusicBrainz(ctx context.Context, a *Artis
 	if a == nil {
 		return nil
 	}
-	mbid := strings.TrimSpace(a.MusicBrainzID)
+	mbid, err := m.resolveArtistMBID(ctx, a)
+	if err != nil {
+		return err
+	}
+	if mbid == "" {
+		mbid = strings.TrimSpace(a.MusicBrainzID)
+	}
 	if mbid == "" {
 		return nil
 	}
-	cli, closeFn, err := m.musicBrainzClient(ctx)
+	cli, closeFn, err := m.withMusicBrainz(ctx)
 	if err != nil {
 		return err
 	}

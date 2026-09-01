@@ -88,6 +88,10 @@ func OpenStore(ctx context.Context, path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("enable WAL: %w", err)
 	}
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
 	s := &Store{db: db}
 	if err := s.migrate(ctx); err != nil {
 		_ = db.Close()
@@ -302,9 +306,7 @@ func (s *Store) RemoveArtist(ctx context.Context, id string) error {
 	if n == 0 {
 		return fmt.Errorf("artist %q not found", id)
 	}
-	// Cascades may be off without PRAGMA foreign_keys; clean children explicitly.
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM tracks WHERE artist_id = ?`, id)
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM albums WHERE artist_id = ?`, id)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM item_tags WHERE item_id = ?`, id)
 	return nil
 }
 

@@ -56,15 +56,18 @@ func (s *Store) UpdateArtist(ctx context.Context, id string, fields map[string]a
 	if v, ok := fields["monitored"].(bool); ok {
 		a.Monitored = v
 	}
+	if v, ok := fields["musicbrainz_id"].(string); ok {
+		a.MusicBrainzID = v
+	}
 	monitored := 0
 	if a.Monitored {
 		monitored = 1
 	}
 	a.UpdatedAt = nowRFC3339()
 	_, err = s.db.ExecContext(ctx, `
-		UPDATE artists SET name = ?, overview = ?, quality_profile_id = ?, root_folder_path = ?,
+		UPDATE artists SET name = ?, musicbrainz_id = ?, overview = ?, quality_profile_id = ?, root_folder_path = ?,
 			monitored = ?, updated_at = ? WHERE id = ?
-	`, a.Name, a.Overview, a.QualityProfileID, a.RootFolderPath, monitored, a.UpdatedAt, id)
+	`, a.Name, a.MusicBrainzID, a.Overview, a.QualityProfileID, a.RootFolderPath, monitored, a.UpdatedAt, id)
 	if err != nil {
 		return nil, fmt.Errorf("update artist: %w", err)
 	}

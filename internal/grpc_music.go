@@ -29,7 +29,13 @@ func (s *musicServer) AddArtist(ctx context.Context, req *musicv1.AddArtistReque
 	if err != nil {
 		return nil, err
 	}
-	s.m.store.appendHistory(ctx, a.ID, "artistAdded", a.Name, "")
+	if syncErr := s.m.syncArtistMetadataFromMusicBrainz(ctx, a); syncErr != nil {
+		slog.Warn("music metadata sync on add artist", "artist", a.Name, "error", syncErr)
+	}
+	if updated, getErr := s.m.store.GetArtist(ctx, a.ID); getErr == nil {
+		a = updated
+	}
+	s.m.store.appendHistory(ctx, a.ID, historyImport, a.Name, "")
 	return &musicv1.AddArtistResponse{Artist: toPBArtist(a)}, nil
 }
 
@@ -37,6 +43,9 @@ func (s *musicServer) RemoveArtist(ctx context.Context, req *musicv1.RemoveArtis
 	if req.GetDeleteFiles() {
 		tracks, _ := s.m.store.ListTracks(ctx, "", req.GetId())
 		for _, t := range tracks {
+			if err := s.m.requirePathAllowed(ctx, t.Path, t.ArtistID); err != nil {
+				continue
+			}
 			_ = os.Remove(t.Path)
 		}
 	}
@@ -171,11 +180,18 @@ func (s *musicServer) UpdateAlbumMonitored(ctx context.Context, req *musicv1.Upd
 }
 
 func (s *musicServer) AddTrackFile(ctx context.Context, req *musicv1.AddTrackFileRequest) (*musicv1.AddTrackFileResponse, error) {
+	al, err := s.m.store.findAlbumByID(ctx, req.GetAlbumId())
+	if err != nil {
+		return nil, err
+	}
+	if pathErr := s.m.requirePathAllowed(ctx, req.GetFilePath(), al.ArtistID); pathErr != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", pathErr)
+	}
 	t, err := s.m.store.AddTrackFile(ctx, req.GetAlbumId(), req.GetFilePath(), req.GetTitle(), req.GetQuality(), req.GetContainer(), req.GetSizeBytes())
 	if err != nil {
 		return nil, err
 	}
-	s.m.store.appendHistory(ctx, t.ArtistID, "trackFileImported", t.Title, t.Quality)
+	s.m.store.appendHistory(ctx, t.ArtistID, historyImport, t.Title, t.Quality)
 	return &musicv1.AddTrackFileResponse{FileId: t.ID}, nil
 }
 
@@ -184,10 +200,15 @@ func (s *musicServer) RemoveTrackFile(ctx context.Context, req *musicv1.RemoveTr
 	if err != nil {
 		return nil, err
 	}
+	if req.GetDeleteFiles() {
+		if err := s.m.requirePathAllowed(ctx, t.Path, t.ArtistID); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+		}
+	}
 	if err := s.m.store.RemoveTrack(ctx, req.GetFileId(), req.GetDeleteFiles()); err != nil {
 		return nil, err
 	}
-	s.m.store.appendHistory(ctx, t.ArtistID, "trackFileDeleted", t.Title, t.Quality)
+	s.m.store.appendHistory(ctx, t.ArtistID, historyDeleteFile, t.Title, t.Quality)
 	return &musicv1.RemoveTrackFileResponse{}, nil
 }
 

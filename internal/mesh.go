@@ -14,6 +14,7 @@ import (
 const (
 	meshMethodListArtists = "ListArtists"
 	meshMethodGetArtist   = "GetArtist"
+	meshMethodScanLibrary = "ScanLibrary"
 )
 
 func meshResponseErr(msg string) (*meshv1.CallResponse, error) {
@@ -116,6 +117,8 @@ func (s *musicMeshServer) Call(ctx context.Context, req *meshv1.CallRequest) (*m
 		return s.listArtists(ctx, req.GetPayload())
 	case meshMethodGetArtist:
 		return s.getArtist(ctx, req.GetPayload())
+	case meshMethodScanLibrary:
+		return s.scanLibrary(ctx)
 	default:
 		return meshResponseErr(fmt.Sprintf("unknown method %q", req.GetMethod()))
 	}
@@ -201,6 +204,18 @@ func toTrackJSON(t *Track) trackJSON {
 		ID: t.ID, AlbumID: t.AlbumID, ArtistID: t.ArtistID, Title: t.Title, Path: t.Path,
 		StreamURL: "/stream/music/" + t.ID,
 	}
+}
+
+func (s *musicMeshServer) scanLibrary(ctx context.Context) (*meshv1.CallResponse, error) {
+	res, err := s.m.ScanLibrary(ctx)
+	if err != nil {
+		return meshResponseErr(err.Error())
+	}
+	raw, err := json.Marshal(res)
+	if err != nil {
+		return meshResponseErr(err.Error())
+	}
+	return &meshv1.CallResponse{Payload: raw}, nil
 }
 
 func (m *Module) albumJSONWithTracks(ctx context.Context, al *Album) albumJSON {

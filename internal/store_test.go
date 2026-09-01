@@ -53,6 +53,67 @@ func TestStoreArtistAlbumRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreRemoveArtistCascadesAlbumsTracksTags(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTempStore(t)
+	ar, err := s.AddArtist(ctx, internal.Artist{Name: "Cascade Artist", Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	al, err := s.AddAlbum(ctx, internal.Album{ArtistID: ar.ID, Title: "Cascade Album", Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddTrackFile(ctx, al.ID, filepath.Join(t.TempDir(), "track.mp3"), "Track", "FLAC", "mp3", 1); err != nil {
+		t.Fatal(err)
+	}
+	tagID, err := s.CreateTag(ctx, "cascade-tag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetItemTags(ctx, ar.ID, []string{tagID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveArtist(ctx, ar.ID); err != nil {
+		t.Fatal(err)
+	}
+	albums, err := s.ListAlbums(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(albums) != 0 {
+		t.Fatalf("albums=%d", len(albums))
+	}
+	tracks, err := s.ListTracks(ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tracks) != 0 {
+		t.Fatalf("tracks=%d", len(tracks))
+	}
+	tags, err := s.ListTags(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tags) != 1 || tags[0].ID != tagID {
+		t.Fatalf("tag definition=%+v", tags)
+	}
+	filtered, _, err := s.ListArtistsPage(ctx, "", tagID, 1, 20, "name", "asc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 0 {
+		t.Fatalf("item_tags should be cleared, artists=%d", len(filtered))
+	}
+	artists, err := s.ListArtists(ctx, "Cascade")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artists) != 0 {
+		t.Fatalf("artists=%d", len(artists))
+	}
+}
+
 func TestStorePersistsAcrossOpen(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
