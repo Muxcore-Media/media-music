@@ -21,20 +21,21 @@ import (
 )
 
 type Module struct {
-	grpcLis            net.Listener
-	httpLis            net.Listener
-	grpcSrv            *grpc.Server
-	mc                 *client.Client
-	store              *Store
-	httpSrv            *http.Server
-	automationSearchFn func(ctx context.Context, req *automationv1.SearchItemRequest) (*automationv1.SearchItemResponse, error)
-	id                 string
-	dataDir            string
-	libraryDir         string
-	grpcAddr           string
-	httpAddr           string
-	mu                 sync.RWMutex
-	cfgMu              sync.RWMutex
+	grpcLis             net.Listener
+	httpLis             net.Listener
+	grpcSrv             *grpc.Server
+	mc                  *client.Client
+	store               *Store
+	httpSrv             *http.Server
+	automationSearchFn  func(ctx context.Context, req *automationv1.SearchItemRequest) (*automationv1.SearchItemResponse, error)
+	musicBrainzOverride musicBrainzAPI
+	id                  string
+	dataDir             string
+	libraryDir          string
+	grpcAddr            string
+	httpAddr            string
+	mu                  sync.RWMutex
+	cfgMu               sync.RWMutex
 }
 
 type Config struct {
@@ -90,7 +91,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 			{Repo: "github.com/Muxcore-Media/contracts-media-admin", Interface: "MediaAdminService", Version: "v0.1.0"},
 		},
 		MinCoreVersion: "0.4.0",
-		HTTPAddr:       m.grpcAddr,
+		HTTPAddr:       m.httpAddr,
 	}
 }
 
@@ -160,9 +161,18 @@ func (m *Module) Start(ctx context.Context) error {
 		}
 	}()
 
+	go m.runStartupScan(ctx)
 	go m.dialCore(ctx)
 	go m.subscribeToFileImported(ctx)
 	return nil
+}
+
+func (m *Module) runStartupScan(ctx context.Context) {
+	if res, err := m.ScanLibrary(ctx); err != nil {
+		slog.Warn("music library scan on start", "error", err)
+	} else {
+		slog.Info("music library scan on start", "found", res.FilesFound, "imported", res.FilesImported, "skipped", res.FilesSkipped)
+	}
 }
 
 func (m *Module) dialCore(ctx context.Context) {
@@ -214,7 +224,7 @@ func (m *Module) getLibraryDir() string {
 }
 
 // ScanLibrary scans the configured library root into SQLite.
-func (m *Module) ScanLibrary() (*ScanResult, error) {
+func (m *Module) ScanLibrary(ctx context.Context) (*ScanResult, error) {
 	m.cfgMu.RLock()
 	root := m.libraryDir
 	store := m.store
@@ -222,7 +232,7 @@ func (m *Module) ScanLibrary() (*ScanResult, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store not open")
 	}
-	return store.ScanLibraryRoot(context.Background(), root)
+	return store.ScanLibraryRoot(ctx, root)
 }
 
 func (m *Module) GRPCListenAddr() string { return m.grpcAddr }

@@ -13,8 +13,22 @@ import (
 func (m *Module) registerMusicHTTPAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/artists", m.handleListArtistsHTTP)
 	mux.HandleFunc("GET /api/artists/{id}", m.handleGetArtistHTTP)
+	mux.HandleFunc("POST /api/scan", m.handleScanLibraryHTTP)
 	mux.HandleFunc("GET /api/tracks/{id}/stream", m.handleStreamTrackHTTP)
 	mux.HandleFunc("GET /api/tracks/{id}/lyrics", m.handleTrackLyricsHTTP)
+}
+
+func (m *Module) handleScanLibraryHTTP(w http.ResponseWriter, r *http.Request) {
+	if m.store == nil {
+		http.Error(w, `{"error":"store not open"}`, http.StatusServiceUnavailable)
+		return
+	}
+	res, err := m.ScanLibrary(r.Context())
+	if err != nil {
+		http.Error(w, fmtJSONError(err), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, res)
 }
 
 func (m *Module) handleStreamTrackHTTP(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +40,10 @@ func (m *Module) handleStreamTrackHTTP(w http.ResponseWriter, r *http.Request) {
 	t, err := m.store.GetTrack(r.Context(), id)
 	if err != nil {
 		http.NotFound(w, r)
+		return
+	}
+	if err := m.requirePathAllowed(r.Context(), t.Path, t.ArtistID); err != nil {
+		http.Error(w, fmtJSONError(err), http.StatusForbidden)
 		return
 	}
 	http.ServeFile(w, r, t.Path)
@@ -65,7 +83,6 @@ func (m *Module) handleTrackLyricsHTTP(w http.ResponseWriter, r *http.Request) {
 		"title":    title,
 		"found":    true,
 		"format":   "lrc",
-		"path":     lrc,
 		"text":     string(raw),
 	})
 }

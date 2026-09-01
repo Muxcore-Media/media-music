@@ -7,7 +7,6 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
 	automationv1 "github.com/Muxcore-Media/contracts-automation/muxcore/automation/v1"
@@ -49,7 +48,7 @@ func (m *Module) automationSearchItem(ctx context.Context, req *automationv1.Sea
 	if err != nil {
 		return nil, err
 	}
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(addr, meshGRPCDialOpts()...)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +64,8 @@ func (m *Module) findAutomationAddr(ctx context.Context) (string, error) {
 	if len(mods) == 0 {
 		return "", fmt.Errorf("no automation module")
 	}
-	addr := mods[0].GetHttpAddr()
+	mod := mods[0]
+	addr := dialAddrForModule(mod.Id, mod.GetHttpAddr())
 	if addr == "" {
 		return "", fmt.Errorf("automation module has no address")
 	}

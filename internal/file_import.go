@@ -12,8 +12,23 @@ import (
 	"github.com/Muxcore-Media/core/pkg/contracts"
 )
 
+const fileImportRetryInterval = 2 * time.Second
+
 func (m *Module) subscribeToFileImported(ctx context.Context) {
-	time.Sleep(15 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		m.mu.RLock()
+		mc := m.mc
+		m.mu.RUnlock()
+		if mc != nil {
+			break
+		}
+		time.Sleep(fileImportRetryInterval)
+	}
 	m.mu.RLock()
 	mc := m.mc
 	m.mu.RUnlock()
@@ -105,6 +120,6 @@ func (m *Module) handleMusicFileImported(ctx context.Context, p contracts.FileIm
 	if err != nil {
 		return err
 	}
-	m.store.appendHistory(ctx, ar.ID, "trackFileImported", trackTitle, quality)
+	m.store.appendHistory(ctx, ar.ID, historyImport, trackTitle, quality)
 	return nil
 }

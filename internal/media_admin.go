@@ -17,10 +17,10 @@ func (m *Module) GetMediaTypeInfo(ctx context.Context, _ *mediaadminv1.GetMediaT
 		DisplayName: "Music",
 		Icon:        "🎵",
 		FilterFields: []*mediaadminv1.FilterField{
-			{Key: "year", Label: "Year", Type: "number"},
-			{Key: "has_file", Label: "Has File", Type: "select", Options: []string{"true", "false"}},
+			{Key: "year", Label: "Year", Type: mediaadminv1.FilterFieldType_FILTER_FIELD_TYPE_NUMBER},
+			{Key: "has_file", Label: "Has File", Type: mediaadminv1.FilterFieldType_FILTER_FIELD_TYPE_SELECT, Options: []string{"true", "false"}},
 		},
-		Features: []string{"missing", "tags"},
+		Features: []mediaadminv1.Feature{mediaadminv1.Feature_FEATURE_MISSING, mediaadminv1.Feature_FEATURE_TAGS},
 	}, nil
 }
 
@@ -36,7 +36,7 @@ func (m *Module) ListItems(ctx context.Context, req *mediaadminv1.ListItemsReque
 	if pageSize < 1 || pageSize > 100 {
 		pageSize = 20
 	}
-	items, total, err := m.store.ListArtistsPage(ctx, req.GetSearch(), req.GetTagId(), page, pageSize, req.GetSortBy(), req.GetSortOrder())
+	items, total, err := m.store.ListArtistsPage(ctx, req.GetSearch(), req.GetTagId(), page, pageSize, sortFieldToColumn(req.GetSortBy()), req.GetSortOrder())
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func (m *Module) ListArtwork(ctx context.Context, req *mediaadminv1.ListArtworkR
 	}
 	var artwork []*mediaadminv1.ArtworkInfo
 	if a.PosterURL != "" {
-		artwork = append(artwork, &mediaadminv1.ArtworkInfo{Type: "poster", Url: a.PosterURL})
+		artwork = append(artwork, &mediaadminv1.ArtworkInfo{Type: mediaadminv1.ArtworkType_ARTWORK_TYPE_POSTER, Url: a.PosterURL})
 	}
 	return &mediaadminv1.ListArtworkResponse{Artwork: artwork}, nil
 }
@@ -125,7 +125,7 @@ func (m *Module) artistToMediaItem(a *Artist) *mediaadminv1.MediaItem {
 	}
 	var artwork []*mediaadminv1.ArtworkInfo
 	if a.PosterURL != "" {
-		artwork = append(artwork, &mediaadminv1.ArtworkInfo{Type: "poster", Url: a.PosterURL})
+		artwork = append(artwork, &mediaadminv1.ArtworkInfo{Type: mediaadminv1.ArtworkType_ARTWORK_TYPE_POSTER, Url: a.PosterURL})
 	}
 	return &mediaadminv1.MediaItem{
 		Id: a.ID, Title: a.Name, Description: a.Overview,

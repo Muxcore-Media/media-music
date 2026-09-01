@@ -103,7 +103,7 @@ func TestModuleInitScan(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Stop(t.Context()) })
 
-	res, err := m.ScanLibrary()
+	res, err := m.ScanLibrary(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestScanConfiguredLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = m.Stop(t.Context()) })
-	res, err := m.ScanLibrary()
+	res, err := m.ScanLibrary(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

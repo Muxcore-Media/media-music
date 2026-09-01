@@ -32,7 +32,7 @@ func TestMeshAndHTTPListArtistsFixtures(t *testing.T) {
 	if err := m.Init(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.ScanLibrary(); err != nil {
+	if _, err := m.ScanLibrary(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Start(t.Context()); err != nil {
@@ -104,5 +104,80 @@ func TestMeshAndHTTPListArtistsFixtures(t *testing.T) {
 	}
 	if detailResp.GetError() != "" {
 		t.Fatalf("GetArtist mesh error: %s", detailResp.GetError())
+	}
+}
+
+func TestHTTPStreamAndLyricsFixtures(t *testing.T) {
+	data := t.TempDir()
+	lib := filepath.Join(data, "music")
+	if err := copyTree(filepath.Join("testdata", "library"), lib); err != nil {
+		t.Fatal(err)
+	}
+
+	m := internal.NewModule(internal.Config{
+		DataDir:    data,
+		LibraryDir: lib,
+		GRPCAddr:   "127.0.0.1:0",
+		HTTPAddr:   "127.0.0.1:0",
+	})
+	if err := m.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ScanLibrary(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.Stop(t.Context()) })
+
+	artists, err := m.Store().ListArtists(t.Context(), "Fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artists) != 1 {
+		t.Fatalf("artists=%d", len(artists))
+	}
+	albums, err := m.Store().ListAlbums(t.Context(), artists[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracks, err := m.Store().ListTracks(t.Context(), albums[0].ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tracks) < 1 {
+		t.Fatal("expected track from fixtures")
+	}
+	trackID := tracks[0].ID
+	base := "http://" + m.HTTPListenAddr()
+
+	streamResp, err := http.Get(base + "/api/tracks/" + trackID + "/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer streamResp.Body.Close()
+	if streamResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(streamResp.Body)
+		t.Fatalf("stream status %d: %s", streamResp.StatusCode, b)
+	}
+
+	lyricsResp, err := http.Get(base + "/api/tracks/" + trackID + "/lyrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lyricsResp.Body.Close()
+	if lyricsResp.StatusCode != http.StatusOK {
+		t.Fatalf("lyrics status %d", lyricsResp.StatusCode)
+	}
+	var lyrics map[string]any
+	if err := json.NewDecoder(lyricsResp.Body).Decode(&lyrics); err != nil {
+		t.Fatal(err)
+	}
+	if lyrics["found"] != true {
+		t.Fatalf("lyrics=%v", lyrics)
+	}
+	if _, ok := lyrics["path"]; ok {
+		t.Fatal("lyrics response must not expose filesystem path")
 	}
 }

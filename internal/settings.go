@@ -1,7 +1,9 @@
 package internal
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/Muxcore-Media/core/pkg/contracts"
 )
@@ -27,6 +29,11 @@ func (m *Module) UpdateSetting(key, value string) error {
 	switch key {
 	case "library_dir":
 		m.libraryDir = value
+		if res, err := m.ScanLibrary(context.Background()); err != nil {
+			slog.Warn("music library scan after library_dir update", "error", err)
+		} else {
+			slog.Info("music library scan after library_dir update", "found", res.FilesFound, "imported", res.FilesImported)
+		}
 	case "data_dir":
 		return fmt.Errorf("data_dir is set at startup (MUSIC_DATA_DIR); restart to change")
 	default:
