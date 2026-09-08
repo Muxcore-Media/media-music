@@ -23,9 +23,9 @@ var audioExts = map[string]struct{}{
 
 // ScanResult summarizes a library root scan.
 type ScanResult struct {
-	FilesFound    int
-	FilesImported int
-	FilesSkipped  int
+	FilesFound    int `json:"files_found"`
+	FilesImported int `json:"files_imported"`
+	FilesSkipped  int `json:"files_skipped"`
 }
 
 // ScanLibraryRoot walks root for audio files and upserts artists/albums/tracks.

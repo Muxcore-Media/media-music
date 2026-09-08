@@ -30,11 +30,13 @@ type getArtistReq struct {
 }
 
 type artistJSON struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	MusicBrainzID string `json:"musicbrainz_id"`
-	Path          string `json:"path"`
-	Monitored     bool   `json:"monitored"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	MusicBrainzID    string `json:"musicbrainz_id"`
+	Path             string `json:"path"`
+	Monitored        bool   `json:"monitored"`
+	QualityProfileID string `json:"quality_profile_id,omitempty"`
+	RootFolderPath   string `json:"root_folder_path,omitempty"`
 }
 
 type albumJSON struct {
@@ -189,6 +191,7 @@ func toArtistJSON(a *Artist) artistJSON {
 	return artistJSON{
 		ID: a.ID, Name: a.Name, MusicBrainzID: a.MusicBrainzID,
 		Monitored: a.Monitored, Path: a.Path,
+		QualityProfileID: a.QualityProfileID, RootFolderPath: a.RootFolderPath,
 	}
 }
 
