@@ -85,14 +85,13 @@ func (m *Module) ListArtwork(ctx context.Context, req *mediaadminv1.ListArtworkR
 		return nil, err
 	}
 	var artwork []*mediaadminv1.ArtworkInfo
-	if a.PosterURL != "" {
-		artwork = append(artwork, &mediaadminv1.ArtworkInfo{Type: mediaadminv1.ArtworkType_ARTWORK_TYPE_POSTER, Url: a.PosterURL})
+	if url := m.servableArtworkURL(a.PosterURL); url != "" {
+		artwork = append(artwork, &mediaadminv1.ArtworkInfo{
+			Id: a.ID + "_poster", ItemId: a.ID,
+			Type: mediaadminv1.ArtworkType_ARTWORK_TYPE_POSTER, Url: url,
+		})
 	}
 	return &mediaadminv1.ListArtworkResponse{Artwork: artwork}, nil
-}
-
-func (m *Module) ReplaceArtwork(_ mediaadminv1.MediaAdminService_ReplaceArtworkServer) error {
-	return status.Error(codes.Unimplemented, "artwork upload not supported for music yet")
 }
 
 func (m *Module) DeleteItem(ctx context.Context, req *mediaadminv1.DeleteItemRequest) (*mediaadminv1.DeleteItemResponse, error) {
@@ -124,8 +123,8 @@ func (m *Module) artistToMediaItem(a *Artist) *mediaadminv1.MediaItem {
 		"path":               a.Path,
 	}
 	var artwork []*mediaadminv1.ArtworkInfo
-	if a.PosterURL != "" {
-		artwork = append(artwork, &mediaadminv1.ArtworkInfo{Type: mediaadminv1.ArtworkType_ARTWORK_TYPE_POSTER, Url: a.PosterURL})
+	if url := m.servableArtworkURL(a.PosterURL); url != "" {
+		artwork = append(artwork, &mediaadminv1.ArtworkInfo{Type: mediaadminv1.ArtworkType_ARTWORK_TYPE_POSTER, Url: url})
 	}
 	return &mediaadminv1.MediaItem{
 		Id: a.ID, Title: a.Name, Description: a.Overview,

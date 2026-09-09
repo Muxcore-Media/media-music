@@ -32,6 +32,7 @@ type Module struct {
 	id                  string
 	dataDir             string
 	libraryDir          string
+	imageDir            string
 	grpcAddr            string
 	httpAddr            string
 	mu                  sync.RWMutex
@@ -74,9 +75,13 @@ func NewModule(cfg Config) *Module {
 	if cfg.LibraryDir == "" {
 		cfg.LibraryDir = filepath.Join(cfg.DataDir, "music")
 	}
+	imageDir := os.Getenv("MUSIC_IMAGE_DIR")
+	if imageDir == "" {
+		imageDir = filepath.Join(cfg.DataDir, "images")
+	}
 	return &Module{
 		id: cfg.ID, grpcAddr: cfg.GRPCAddr, httpAddr: cfg.HTTPAddr,
-		dataDir: cfg.DataDir, libraryDir: cfg.LibraryDir,
+		dataDir: cfg.DataDir, libraryDir: cfg.LibraryDir, imageDir: imageDir,
 	}
 }
 
@@ -101,6 +106,9 @@ func (m *Module) Init(ctx context.Context) error {
 	}
 	if err := os.MkdirAll(m.libraryDir, 0o700); err != nil {
 		return fmt.Errorf("create library dir: %w", err)
+	}
+	if err := os.MkdirAll(m.getImageDir(), 0o700); err != nil {
+		return fmt.Errorf("create image dir: %w", err)
 	}
 	dbPath := filepath.Join(m.dataDir, "music.db")
 	store, err := OpenStore(ctx, dbPath)
@@ -150,6 +158,9 @@ func (m *Module) Start(ctx context.Context) error {
 		_, _ = w.Write([]byte("ok"))
 	})
 	m.registerMusicHTTPAPI(mux)
+	mux.HandleFunc("/images/", func(w http.ResponseWriter, r *http.Request) {
+		http.StripPrefix("/images/", http.FileServer(http.Dir(m.getImageDir()))).ServeHTTP(w, r)
+	})
 	m.httpSrv = &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
