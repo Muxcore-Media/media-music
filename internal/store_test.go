@@ -74,6 +74,13 @@ func TestStoreRemoveArtistCascadesAlbumsTracksTags(t *testing.T) {
 	if err := s.SetItemTags(ctx, ar.ID, []string{tagID}); err != nil {
 		t.Fatal(err)
 	}
+	got, err := s.GetItemTags(ctx, ar.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != tagID || got[0].Label != "cascade-tag" {
+		t.Fatalf("item tags: %+v", got)
+	}
 	if err := s.RemoveArtist(ctx, ar.ID); err != nil {
 		t.Fatal(err)
 	}

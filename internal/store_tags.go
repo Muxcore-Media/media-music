@@ -51,6 +51,31 @@ func (s *Store) ListTags(ctx context.Context) ([]*Tag, error) {
 	return out, rows.Err()
 }
 
+func (s *Store) GetItemTags(ctx context.Context, itemID string) ([]*Tag, error) {
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		return nil, fmt.Errorf("item_id required")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT t.id, t.label, t.created_at FROM tags t
+		INNER JOIN item_tags it ON it.tag_id = t.id
+		WHERE it.item_id = ? ORDER BY t.label
+	`, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]*Tag, 0)
+	for rows.Next() {
+		var t Tag
+		if err := rows.Scan(&t.ID, &t.Label, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, &t)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) SetItemTags(ctx context.Context, itemID string, tagIDs []string) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM item_tags WHERE item_id = ?`, itemID); err != nil {
 		return err

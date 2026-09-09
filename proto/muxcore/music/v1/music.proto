@@ -23,6 +23,7 @@ service MusicManagementService {
   rpc DeleteTag(DeleteTagRequest) returns (DeleteTagResponse);
   rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
   rpc SetItemTags(SetItemTagsRequest) returns (SetItemTagsResponse);
+  rpc GetItemTags(GetItemTagsRequest) returns (GetItemTagsResponse);
 }
 
 message Artist {
@@ -237,3 +238,11 @@ message SetItemTagsRequest {
 }
 
 message SetItemTagsResponse {}
+
+message GetItemTagsRequest {
+  string item_id = 1;
+}
+
+message GetItemTagsResponse {
+  repeated Tag tags = 1;
+}

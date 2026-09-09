@@ -258,6 +258,18 @@ func (s *musicServer) SetItemTags(ctx context.Context, req *musicv1.SetItemTagsR
 	return &musicv1.SetItemTagsResponse{}, nil
 }
 
+func (s *musicServer) GetItemTags(ctx context.Context, req *musicv1.GetItemTagsRequest) (*musicv1.GetItemTagsResponse, error) {
+	tags, err := s.m.store.GetItemTags(ctx, req.GetItemId())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*musicv1.Tag, 0, len(tags))
+	for _, t := range tags {
+		out = append(out, &musicv1.Tag{Id: t.ID, Label: t.Label, CreatedAt: t.CreatedAt})
+	}
+	return &musicv1.GetItemTagsResponse{Tags: out}, nil
+}
+
 func toPBArtist(a *Artist) *musicv1.Artist {
 	return &musicv1.Artist{
 		Id: a.ID, Name: a.Name, MusicbrainzId: a.MusicBrainzID,
