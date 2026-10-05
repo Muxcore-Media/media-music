@@ -1,7 +1,7 @@
 {
   "id": "media-music",
   "name": "Music Manager",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Lidarr-class music library manager with SQLite persistence and admin UI integration",
   "roles": [
     "media_manager",

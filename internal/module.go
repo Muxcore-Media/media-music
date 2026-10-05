@@ -17,6 +17,8 @@ import (
 	mediaadminv1 "github.com/Muxcore-Media/contracts-media-admin/gen/muxcore/media/admin/v1"
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	"github.com/Muxcore-Media/core/sdk/go/client"
+	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
+	manifest "github.com/Muxcore-Media/media-music"
 	musicv1 "github.com/Muxcore-Media/media-music/proto/gen/muxcore/music/v1"
 )
 
@@ -87,7 +89,7 @@ func NewModule(cfg Config) *Module {
 
 func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
-		ID: m.id, Name: "Music Manager", Version: "0.3.0",
+		ID: m.id, Name: "Music Manager", Version: modulesdk.ManifestVersion(manifest.ManifestJSON),
 		Roles:        []string{"media_manager", "media", "music"},
 		Description:  "Lidarr-class music library manager with SQLite persistence and admin UI integration",
 		Author:       "MuxCore",
