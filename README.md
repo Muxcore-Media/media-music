@@ -76,4 +76,4 @@ Docker (from workspace root): `docker build -f media-music/Dockerfile .`
 
 ## Status
 
-v0.3.0 — MediaAdmin, MusicBrainz name lookup + release groups, library scan (start/settings/mesh/HTTP), file-import retry, path guards, stream/lyrics, tags/missing/history, Forgejo golangci-lint CI.
+v0.3.0 — MediaAdmin, MusicBrainz name lookup + release groups, library scan (start/settings/mesh/HTTP), file-import retry, path guards, stream/lyrics, tags/missing/history, golangci-lint CI.
