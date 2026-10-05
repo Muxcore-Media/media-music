@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
+	"github.com/Muxcore-Media/core/sdk/go/module/pathguard"
 	manifest "github.com/Muxcore-Media/media-music"
 	musicv1 "github.com/Muxcore-Media/media-music/proto/gen/muxcore/music/v1"
 )
@@ -245,7 +247,15 @@ func (m *Module) ScanLibrary(ctx context.Context) (*ScanResult, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store not open")
 	}
-	return store.ScanLibraryRoot(ctx, root)
+	abs, err := filepath.Abs(strings.TrimSpace(root))
+	if err != nil {
+		return nil, fmt.Errorf("library root: %w", err)
+	}
+	resolved, err := pathguard.Confine(abs, []string{abs})
+	if err != nil {
+		return nil, fmt.Errorf("library root: %w", err)
+	}
+	return store.ScanLibraryRoot(ctx, resolved)
 }
 
 func (m *Module) GRPCListenAddr() string { return m.grpcAddr }

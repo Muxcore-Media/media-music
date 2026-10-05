@@ -60,9 +60,16 @@ func (m *Module) handleTrackLyricsHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if err := m.requirePathAllowed(r.Context(), t.Path, t.ArtistID); err != nil {
+		http.Error(w, fmtJSONError(err), http.StatusForbidden)
+		return
+	}
 	trackPath := t.Path
 	title := t.Title
 	lrc := findLyricsBeside(trackPath)
+	if lrc != "" && !m.pathAllowed(lrc) {
+		lrc = ""
+	}
 	if lrc == "" {
 		writeJSON(w, map[string]any{
 			"track_id": id,

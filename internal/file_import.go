@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -83,6 +84,9 @@ func (m *Module) handleMusicFileImported(ctx context.Context, p contracts.FileIm
 	}
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(m.getLibraryDir(), path)
+	}
+	if !m.pathAllowed(path) {
+		return fmt.Errorf("path %q is outside library_dir", path)
 	}
 	st, err := os.Stat(path)
 	if err != nil || st.IsDir() {

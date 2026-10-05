@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+- Track streaming, deletes, lyrics, imports, and artist paths must resolve inside `MUSIC_LIBRARY_DIR`. Symlink escapes are refused. An artist folder outside the library is no longer a second allow-list root.
+
 ## [0.3.2] - 2026-10-05
 
 ### Changed

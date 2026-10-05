@@ -21,6 +21,12 @@ type musicServer struct {
 }
 
 func (s *musicServer) AddArtist(ctx context.Context, req *musicv1.AddArtistRequest) (*musicv1.AddArtistResponse, error) {
+	if p := strings.TrimSpace(req.GetPath()); p != "" && !s.m.pathAllowed(p) {
+		return nil, status.Errorf(codes.InvalidArgument, "path %q is outside library_dir", p)
+	}
+	if p := strings.TrimSpace(req.GetRootFolderPath()); p != "" && !s.m.pathAllowed(p) {
+		return nil, status.Errorf(codes.InvalidArgument, "root folder %q is outside library_dir", p)
+	}
 	a, err := s.m.store.AddArtist(ctx, Artist{
 		Name: req.GetName(), MusicBrainzID: req.GetMusicbrainzId(),
 		Monitored: req.GetMonitored(), Path: req.GetPath(),
@@ -66,6 +72,8 @@ func (s *musicServer) RefreshMetadata(ctx context.Context, req *musicv1.RefreshM
 	root := a.Path
 	if root == "" {
 		root = s.m.getLibraryDir()
+	} else if !s.m.pathAllowed(root) {
+		return nil, status.Errorf(codes.InvalidArgument, "artist path %q is outside library_dir", root)
 	}
 	if _, err := s.m.store.ScanLibraryRoot(ctx, root); err != nil {
 		return nil, err
