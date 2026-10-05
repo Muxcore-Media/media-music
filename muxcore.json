@@ -3,7 +3,11 @@
   "name": "Music Manager",
   "version": "0.3.0",
   "description": "Lidarr-class music library manager with SQLite persistence and admin UI integration",
-  "roles": ["media_manager", "media", "music"],
+  "roles": [
+    "media_manager",
+    "media",
+    "music"
+  ],
   "capabilities": [
     "media.library",
     "media.library.music",

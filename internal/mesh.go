@@ -34,9 +34,9 @@ type artistJSON struct {
 	Name             string `json:"name"`
 	MusicBrainzID    string `json:"musicbrainz_id"`
 	Path             string `json:"path"`
-	Monitored        bool   `json:"monitored"`
 	QualityProfileID string `json:"quality_profile_id,omitempty"`
 	RootFolderPath   string `json:"root_folder_path,omitempty"`
+	Monitored        bool   `json:"monitored"`
 }
 
 type albumJSON struct {

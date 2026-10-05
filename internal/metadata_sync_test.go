@@ -7,8 +7,8 @@ import (
 
 	"google.golang.org/grpc"
 
-	musicbrainzv1 "github.com/Muxcore-Media/metadata-musicbrainz/proto/musicbrainzv1"
 	"github.com/Muxcore-Media/media-music/internal"
+	musicbrainzv1 "github.com/Muxcore-Media/metadata-musicbrainz/proto/musicbrainzv1"
 )
 
 type fakeMusicBrainz struct {
